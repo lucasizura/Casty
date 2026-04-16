@@ -744,7 +744,7 @@ function BottomNav({ tab, setTab }) {
   return (
     <div style={{ position: "sticky", bottom: 0, background: "#fff", borderTop: "1px solid #F1EFE8", display: "flex", zIndex: 20, marginLeft: -16, marginRight: -16 }}>
       {[
-        { id: "list", label: "Casty", icon: "📦" },
+        { id: "list", label: "Inventario", icon: "📦" },
         { id: "historial", label: "Historial", icon: "📊" },
       ].map((t) => (
         <button key={t.id} onClick={() => setTab(t.id)} style={{ flex: 1, background: "none", border: "none", padding: "10px 0", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 2, fontFamily: "inherit" }}>
@@ -978,7 +978,7 @@ function InventoryApp({ session }) {
           : items.length === 0 ? (
             <div style={{ textAlign: "center", padding: "4rem 1rem" }}>
               <div style={{ fontSize: 48, marginBottom: 14, opacity: 0.2 }}>📦</div>
-              <p style={{ fontSize: 18, fontWeight: 600, margin: "0 0 6px" }}>Casty vacío</p>
+              <p style={{ fontSize: 18, fontWeight: 600, margin: "0 0 6px" }}>Inventario vacío</p>
               <p style={{ fontSize: 14, color: "#888780", margin: "0 0 24px" }}>Agregá tu primer producto</p>
               <button onClick={() => setView("form")} style={{ background: "#1D9E75", color: "#fff", border: "none", borderRadius: 14, padding: "14px 32px", fontSize: 16, fontWeight: 600, cursor: "pointer", minHeight: 48 }}>+ Agregar producto</button>
             </div>
