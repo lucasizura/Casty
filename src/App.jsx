@@ -30,13 +30,11 @@ const METODOS_PAGO = [
   { id: "cheque", label: "Cheque", icon: "📄" },
 ];
 
-function getMetodo(id) {
-  return METODOS_PAGO.find((m) => m.id === id);
-}
-
 const BUCKET = "fotos-productos";
 const MAX_PHOTO_MB = 5;
+const MAX_PHOTOS = 4;
 const FETCH_LIMIT = 500;
+const STALE_DAYS = 90;
 
 function formatCurrency(n) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n || 0);
@@ -58,8 +56,16 @@ function monthLabel(yyyy, mm) {
   const names = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
   return `${names[parseInt(mm) - 1]} ${String(yyyy).slice(2)}`;
 }
+function monthLabelFull(key) {
+  const names = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+  const [yyyy, mm] = key.split("-");
+  return `${names[parseInt(mm) - 1]} ${yyyy}`;
+}
 function getCat(id) {
   return CATEGORIAS.find((c) => c.id === id) || { label: "Otros", icon: "📦" };
+}
+function getMetodo(id) {
+  return METODOS_PAGO.find((m) => m.id === id);
 }
 function normalize(s) {
   return (s || "").toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -72,11 +78,27 @@ function storagePathFromUrl(url) {
   const i = url.indexOf(marker);
   return i === -1 ? null : url.slice(i + marker.length);
 }
+function staleDays(item) {
+  if (item.fecha_venta || !item.fecha_compra) return 0;
+  const diff = Date.now() - new Date(item.fecha_compra + "T00:00:00").getTime();
+  return Math.floor(diff / 86400000);
+}
+function firstPhoto(item) {
+  return item.fotos_urls && item.fotos_urls.length > 0 ? item.fotos_urls[0] : "";
+}
 
 function StatusBadge({ sold }) {
   return (
     <span style={{ fontSize: 11, fontWeight: 600, padding: "4px 10px", borderRadius: 20, background: sold ? "#EAF3DE" : "#E6F1FB", color: sold ? "#3B6D11" : "#185FA5", whiteSpace: "nowrap" }}>
       {sold ? "Vendido" : "En stock"}
+    </span>
+  );
+}
+
+function StaleChip({ days }) {
+  return (
+    <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 6, background: "#FFF1E0", color: "#A35B0A", whiteSpace: "nowrap" }}>
+      🐌 {days}d
     </span>
   );
 }
@@ -148,7 +170,7 @@ function CategoryPicker({ value, onChange }) {
       <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#5F5E5A", marginBottom: 8 }}>Categoría</label>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
         {CATEGORIAS.map((c) => (
-          <button key={c.id} onClick={() => onChange(c.id)} style={{
+          <button key={c.id} type="button" onClick={() => onChange(c.id)} style={{
             background: value === c.id ? "#E1F5EE" : "#F7F6F3",
             border: value === c.id ? "2px solid #1D9E75" : "2px solid transparent",
             borderRadius: 10, padding: "8px 4px", cursor: "pointer",
@@ -164,16 +186,84 @@ function CategoryPicker({ value, onChange }) {
   );
 }
 
-function PaymentSection({ f, s, showNote }) {
+function MultiPhotoUpload({ photos, onChange, onError }) {
+  const ref = useRef();
+  const [uploading, setUploading] = useState(false);
+
+  const upload = async (file) => {
+    setUploading(true);
+    try {
+      const ext = (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "");
+      const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext || "jpg"}`;
+      const { error } = await supabase.storage.from(BUCKET).upload(path, file, { cacheControl: "3600", upsert: false, contentType: file.type });
+      if (error) throw error;
+      const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+      onChange([...(photos || []), data.publicUrl]);
+    } catch (err) {
+      onError?.("Error subiendo foto: " + (err.message || "desconocido"));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handle = (e) => {
+    const f = e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    if (f.size > MAX_PHOTO_MB * 1024 * 1024) {
+      onError?.(`La foto no puede pesar más de ${MAX_PHOTO_MB} MB`);
+      return;
+    }
+    upload(f);
+  };
+
+  const removeAt = async (idx) => {
+    const url = photos[idx];
+    if (url && isStorageUrl(url)) {
+      const path = storagePathFromUrl(url);
+      if (path) await supabase.storage.from(BUCKET).remove([path]);
+    }
+    onChange(photos.filter((_, i) => i !== idx));
+  };
+
+  const canAdd = (photos?.length || 0) < MAX_PHOTOS;
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#5F5E5A", marginBottom: 8 }}>
+        Fotos <span style={{ color: "#888780", fontWeight: 500 }}>({(photos?.length || 0)}/{MAX_PHOTOS})</span>
+      </label>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
+        {(photos || []).map((url, idx) => (
+          <div key={idx} style={{ position: "relative", aspectRatio: "1", borderRadius: 10, overflow: "hidden", background: `url(${url}) center/cover no-repeat #F7F6F3` }}>
+            <button type="button" onClick={() => removeAt(idx)} aria-label="Quitar foto" style={{ position: "absolute", top: 4, right: 4, background: "rgba(0,0,0,0.6)", color: "#fff", border: "none", borderRadius: "50%", width: 22, height: 22, fontSize: 14, lineHeight: 1, cursor: "pointer", fontFamily: "inherit", padding: 0 }}>×</button>
+            {idx === 0 && <span style={{ position: "absolute", bottom: 4, left: 4, background: "rgba(0,0,0,0.6)", color: "#fff", borderRadius: 6, padding: "1px 6px", fontSize: 9, fontWeight: 600 }}>Principal</span>}
+          </div>
+        ))}
+        {canAdd && (
+          <div onClick={() => !uploading && ref.current.click()} style={{ aspectRatio: "1", borderRadius: 10, border: "2px dashed #D3D1C7", background: "#F7F6F3", display: "flex", alignItems: "center", justifyContent: "center", cursor: uploading ? "default" : "pointer", color: "#888780" }}>
+            {uploading ? <Spinner small /> : <div style={{ textAlign: "center" }}><div style={{ fontSize: 22, lineHeight: 1 }}>+</div><div style={{ fontSize: 9, fontWeight: 600 }}>Foto</div></div>}
+          </div>
+        )}
+      </div>
+      <input ref={ref} type="file" accept="image/*" onChange={handle} style={{ display: "none" }} />
+    </div>
+  );
+}
+
+function SaleSection({ f, s, showNote }) {
   const metodo = f.metodo_pago || "efectivo";
   return (
     <div style={{ background: "#F7F6F3", borderRadius: 14, padding: 14, marginBottom: 14 }}>
-      <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#5F5E5A", marginBottom: showNote ? 4 : 8 }}>Método de pago</label>
+      <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#5F5E5A", marginBottom: showNote ? 4 : 10 }}>Datos de la venta</label>
       {showNote && (
-        <p style={{ fontSize: 11, color: "#888780", margin: "0 0 10px", lineHeight: 1.4 }}>
-          Se guarda solo cuando marques el producto como vendido (completando Fecha venta).
+        <p style={{ fontSize: 11, color: "#888780", margin: "0 0 12px", lineHeight: 1.4 }}>
+          Estos datos se guardan cuando marques el producto como vendido (completando Fecha venta).
         </p>
       )}
+      <Field label="Comprador (opcional)"><input style={inp} value={f.comprador_nombre} onChange={(e) => s("comprador_nombre", e.target.value)} placeholder="Ej: Juan Pérez" /></Field>
+      <Field label="Teléfono del comprador (opcional)"><input style={inp} type="tel" inputMode="tel" value={f.comprador_telefono} onChange={(e) => s("comprador_telefono", e.target.value)} placeholder="Ej: 11 5555 1234" /></Field>
+      <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#5F5E5A", marginBottom: 6 }}>Método de pago</label>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: metodo !== "efectivo" ? 14 : 0 }}>
         {METODOS_PAGO.map((m) => (
           <button key={m.id} type="button" onClick={() => s("metodo_pago", m.id)} style={{
@@ -201,80 +291,7 @@ function PaymentSection({ f, s, showNote }) {
             <Field label="Monto ($)"><input style={inp} type="number" inputMode="numeric" value={f.cheque_monto} onChange={(e) => s("cheque_monto", e.target.value)} placeholder="0" /></Field>
           </div>
           <Field label="Fecha de cobro"><input style={inp} type="date" value={f.cheque_fecha_cobro} onChange={(e) => s("cheque_fecha_cobro", e.target.value)} /></Field>
-          <Field label="Titular / librador (opcional)"><input style={inp} value={f.cheque_titular} onChange={(e) => s("cheque_titular", e.target.value)} placeholder="Ej: Juan Pérez" /></Field>
         </>
-      )}
-    </div>
-  );
-}
-
-function PhotoUpload({ value, onChange, onError }) {
-  const ref = useRef();
-  const [uploading, setUploading] = useState(false);
-
-  const upload = async (file) => {
-    setUploading(true);
-    try {
-      if (value && isStorageUrl(value)) {
-        const oldPath = storagePathFromUrl(value);
-        if (oldPath) await supabase.storage.from(BUCKET).remove([oldPath]);
-      }
-      const ext = (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "");
-      const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext || "jpg"}`;
-      const { error } = await supabase.storage.from(BUCKET).upload(path, file, { cacheControl: "3600", upsert: false, contentType: file.type });
-      if (error) throw error;
-      const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
-      onChange(data.publicUrl);
-    } catch (err) {
-      onError?.("Error subiendo foto: " + (err.message || "desconocido"));
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const handle = (e) => {
-    const f = e.target.files[0];
-    e.target.value = "";
-    if (!f) return;
-    if (f.size > MAX_PHOTO_MB * 1024 * 1024) {
-      onError?.(`La foto no puede pesar más de ${MAX_PHOTO_MB} MB`);
-      return;
-    }
-    upload(f);
-  };
-
-  const removePhoto = async () => {
-    if (value && isStorageUrl(value)) {
-      const path = storagePathFromUrl(value);
-      if (path) await supabase.storage.from(BUCKET).remove([path]);
-    }
-    onChange("");
-  };
-
-  return (
-    <div>
-      <div onClick={() => !uploading && ref.current.click()} style={{ width: "100%", height: 180, borderRadius: 16, border: value ? "none" : "2px dashed #D3D1C7", background: value ? `url(${value}) center/cover no-repeat` : "#F7F6F3", display: "flex", alignItems: "center", justifyContent: "center", cursor: uploading ? "default" : "pointer", position: "relative", overflow: "hidden" }}>
-        {uploading && (
-          <div style={{ position: "absolute", inset: 0, background: "rgba(255,255,255,0.8)", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 6 }}>
-            <Spinner small />
-            <span style={{ fontSize: 12, color: "#5F5E5A", fontWeight: 600 }}>Subiendo...</span>
-          </div>
-        )}
-        {!value && !uploading && (
-          <div style={{ textAlign: "center", color: "#888780" }}>
-            <div style={{ fontSize: 28, marginBottom: 4 }}>📷</div>
-            <div style={{ fontSize: 13 }}>Tocá para subir foto</div>
-          </div>
-        )}
-        {value && !uploading && (
-          <div style={{ position: "absolute", bottom: 8, right: 8, background: "rgba(0,0,0,0.5)", color: "#fff", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 600 }}>Cambiar</div>
-        )}
-        <input ref={ref} type="file" accept="image/*" onChange={handle} style={{ display: "none" }} />
-      </div>
-      {value && !uploading && (
-        <button type="button" onClick={removePhoto} style={{ background: "none", border: "none", color: "#A32D2D", fontSize: 13, fontWeight: 600, cursor: "pointer", marginTop: 6, padding: "4px 0", fontFamily: "inherit" }}>
-          Quitar foto
-        </button>
       )}
     </div>
   );
@@ -289,7 +306,7 @@ function ProductForm({ item, onSave, onDelete, saving, onRequestDelete, onError 
     ubicacion: item?.ubicacion || "",
     fecha_compra: item?.fecha_compra || "",
     fecha_venta: item?.fecha_venta || "",
-    foto_url: item?.foto_url || "",
+    fotos_urls: item?.fotos_urls || [],
     categoria: item?.categoria || "otros",
     metodo_pago: item?.metodo_pago || "efectivo",
     pago_nota: item?.pago_nota || "",
@@ -297,7 +314,8 @@ function ProductForm({ item, onSave, onDelete, saving, onRequestDelete, onError 
     cheque_numero: item?.cheque_numero || "",
     cheque_monto: item?.cheque_monto ?? "",
     cheque_fecha_cobro: item?.cheque_fecha_cobro || "",
-    cheque_titular: item?.cheque_titular || "",
+    comprador_nombre: item?.comprador_nombre || "",
+    comprador_telefono: item?.comprador_telefono || "",
   });
   const s = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
@@ -324,20 +342,22 @@ function ProductForm({ item, onSave, onDelete, saving, onRequestDelete, onError 
       precio_venta: precioVenta,
       fecha_compra: f.fecha_compra || null,
       fecha_venta: f.fecha_venta || null,
+      fotos_urls: f.fotos_urls || [],
       metodo_pago: isSold ? (f.metodo_pago || "efectivo") : null,
       pago_nota: isSold && f.metodo_pago === "transferencia" ? (f.pago_nota || null) : null,
       cheque_banco: isSold && f.metodo_pago === "cheque" ? (f.cheque_banco || null) : null,
       cheque_numero: isSold && f.metodo_pago === "cheque" ? (f.cheque_numero || null) : null,
       cheque_monto: isSold && f.metodo_pago === "cheque" && f.cheque_monto !== "" ? Number(f.cheque_monto) || 0 : null,
       cheque_fecha_cobro: isSold && f.metodo_pago === "cheque" ? (f.cheque_fecha_cobro || null) : null,
-      cheque_titular: isSold && f.metodo_pago === "cheque" ? (f.cheque_titular || null) : null,
+      comprador_nombre: isSold ? (f.comprador_nombre || null) : null,
+      comprador_telefono: isSold ? (f.comprador_telefono || null) : null,
     });
   };
 
   return (
     <div style={{ animation: "fadeIn 0.2s ease", paddingBottom: 30 }}>
-      <PhotoUpload value={f.foto_url} onChange={(v) => s("foto_url", v)} onError={onError} />
-      <div style={{ marginTop: 16 }}>
+      <MultiPhotoUpload photos={f.fotos_urls} onChange={(v) => s("fotos_urls", v)} onError={onError} />
+      <div>
         <Field label="Nombre del producto"><input style={inp} value={f.nombre} onChange={(e) => s("nombre", e.target.value)} placeholder="Ej: Reloj Longines 1940" /></Field>
         <CategoryPicker value={f.categoria} onChange={(v) => s("categoria", v)} />
         <Field label="Descripción"><textarea style={{ ...inp, minHeight: 65, resize: "vertical" }} value={f.descripcion} onChange={(e) => s("descripcion", e.target.value)} placeholder="Materiales, época, estado..." /></Field>
@@ -350,7 +370,7 @@ function ProductForm({ item, onSave, onDelete, saving, onRequestDelete, onError 
           <Field label="Fecha compra"><input style={inp} type="date" value={f.fecha_compra} onChange={(e) => s("fecha_compra", e.target.value)} /></Field>
           <Field label="Fecha venta"><input style={inp} type="date" value={f.fecha_venta} onChange={(e) => s("fecha_venta", e.target.value)} /></Field>
         </div>
-        <PaymentSection f={f} s={s} showNote={!f.fecha_venta} />
+        <SaleSection f={f} s={s} showNote={!f.fecha_venta} />
       </div>
       <button disabled={saving} onClick={handleSave} style={{ width: "100%", background: saving ? "#9FE1CB" : "#1D9E75", color: "#fff", border: "none", borderRadius: 14, padding: "14px 0", fontSize: 16, fontWeight: 600, cursor: saving ? "default" : "pointer", marginTop: 8, minHeight: 48 }}>
         {saving ? "Guardando..." : item ? "Guardar cambios" : "Agregar producto"}
@@ -367,19 +387,22 @@ function ProductForm({ item, onSave, onDelete, saving, onRequestDelete, onError 
 function ProductCard({ item, onClick }) {
   const profit = item.precio_venta ? Number(item.precio_venta) - Number(item.precio_compra) : null;
   const cat = getCat(item.categoria);
+  const foto = firstPhoto(item);
+  const stale = !item.fecha_venta ? staleDays(item) : 0;
   return (
     <div role="button" tabIndex={0} onClick={onClick} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }} style={{ display: "flex", gap: 12, padding: "12px 0", borderBottom: "1px solid #F1EFE8", cursor: "pointer", outline: "none" }}>
-      <div style={{ width: 64, height: 64, minWidth: 64, borderRadius: 12, overflow: "hidden", background: item.foto_url ? `url(${item.foto_url}) center/cover no-repeat` : "#F7F6F3", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26 }}>
-        {!item.foto_url && cat.icon}
+      <div style={{ width: 64, height: 64, minWidth: 64, borderRadius: 12, overflow: "hidden", background: foto ? `url(${foto}) center/cover no-repeat` : "#F7F6F3", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26 }}>
+        {!foto && cat.icon}
       </div>
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
           <p style={{ fontSize: 15, fontWeight: 600, margin: 0, color: "#2C2C2A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.nombre}</p>
           <StatusBadge sold={!!item.fecha_venta} />
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "2px 0" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "2px 0", flexWrap: "wrap" }}>
           <span style={{ fontSize: 11, background: "#F1EFE8", color: "#5F5E5A", padding: "2px 7px", borderRadius: 6, fontWeight: 500 }}>{cat.icon} {cat.label}</span>
           {item.ubicacion && <span style={{ fontSize: 11, color: "#888780" }}>· {item.ubicacion}</span>}
+          {stale >= STALE_DAYS && <StaleChip days={stale} />}
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 2 }}>
           <span style={{ fontSize: 14, fontWeight: 700, color: "#1D9E75" }}>{formatCurrency(item.precio_compra)}</span>
@@ -400,11 +423,12 @@ function Stats({ items }) {
     const today = new Date().toISOString().slice(0, 10);
     const chequesPend = items.filter((i) => i.metodo_pago === "cheque" && i.cheque_fecha_cobro && i.cheque_fecha_cobro >= today);
     const chequesMonto = chequesPend.reduce((s, i) => s + (Number(i.cheque_monto) || Number(i.precio_venta) || 0), 0);
-    return { stock: stock.length, vendidos: vendidos.length, invertido, ganancia, chequesCount: chequesPend.length, chequesMonto };
+    const staleCount = items.filter((i) => !i.fecha_venta && staleDays(i) >= STALE_DAYS).length;
+    return { stock: stock.length, vendidos: vendidos.length, invertido, ganancia, chequesCount: chequesPend.length, chequesMonto, staleCount };
   }, [items]);
   return (
     <>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: stats.chequesCount > 0 ? 8 : 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: (stats.chequesCount > 0 || stats.staleCount > 0) ? 8 : 16 }}>
         {[
           { label: "En stock", value: stats.stock, color: "#185FA5" },
           { label: "Vendidos", value: stats.vendidos, color: "#3B6D11" },
@@ -418,7 +442,7 @@ function Stats({ items }) {
         ))}
       </div>
       {stats.chequesCount > 0 && (
-        <div style={{ background: "#FFF7E6", border: "1px solid #F5E3B8", borderRadius: 12, padding: "10px 14px", marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ background: "#FFF7E6", border: "1px solid #F5E3B8", borderRadius: 12, padding: "10px 14px", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             <div style={{ fontSize: 11, color: "#854F0B", marginBottom: 2, fontWeight: 600 }}>📄 Cheques por cobrar</div>
             <div style={{ fontSize: 12, color: "#854F0B" }}>{stats.chequesCount} {stats.chequesCount === 1 ? "cheque pendiente" : "cheques pendientes"}</div>
@@ -426,6 +450,15 @@ function Stats({ items }) {
           <div style={{ fontSize: 16, fontWeight: 700, color: "#854F0B" }}>{formatCurrency(stats.chequesMonto)}</div>
         </div>
       )}
+      {stats.staleCount > 0 && (
+        <div style={{ background: "#FFF1E0", border: "1px solid #F5D7B8", borderRadius: 12, padding: "10px 14px", marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 11, color: "#A35B0A", marginBottom: 2, fontWeight: 600 }}>🐌 Sin mover hace +{STALE_DAYS} días</div>
+            <div style={{ fontSize: 12, color: "#A35B0A" }}>{stats.staleCount} {stats.staleCount === 1 ? "producto" : "productos"}</div>
+          </div>
+        </div>
+      )}
+      {(stats.chequesCount === 0 && stats.staleCount === 0) ? null : null}
     </>
   );
 }
@@ -444,20 +477,88 @@ function CategoryFilter({ value, onChange, items }) {
   );
 }
 
+function AdvancedFilters({ filters, setFilters }) {
+  const [open, setOpen] = useState(false);
+  const active = filters.priceMin || filters.priceMax || filters.compraDesde || filters.compraHasta || filters.staleOnly;
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <button onClick={() => setOpen((v) => !v)} style={{ width: "100%", background: active ? "#E1F5EE" : "#F7F6F3", color: active ? "#0F6E56" : "#5F5E5A", border: "none", borderRadius: 10, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span>Filtros avanzados{active ? " • activos" : ""}</span>
+        <span>{open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div style={{ background: "#F7F6F3", borderRadius: 12, padding: 12, marginTop: 6 }}>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#5F5E5A", marginBottom: 4 }}>Precio compra</label>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+            <input type="number" inputMode="numeric" style={inp} placeholder="Desde ($)" value={filters.priceMin} onChange={(e) => setFilters({ ...filters, priceMin: e.target.value })} />
+            <input type="number" inputMode="numeric" style={inp} placeholder="Hasta ($)" value={filters.priceMax} onChange={(e) => setFilters({ ...filters, priceMax: e.target.value })} />
+          </div>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#5F5E5A", marginBottom: 4 }}>Fecha de compra</label>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+            <input type="date" style={inp} value={filters.compraDesde} onChange={(e) => setFilters({ ...filters, compraDesde: e.target.value })} />
+            <input type="date" style={inp} value={filters.compraHasta} onChange={(e) => setFilters({ ...filters, compraHasta: e.target.value })} />
+          </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#5F5E5A", cursor: "pointer", marginBottom: active ? 10 : 0 }}>
+            <input type="checkbox" checked={filters.staleOnly} onChange={(e) => setFilters({ ...filters, staleOnly: e.target.checked })} /> Solo sin mover hace +{STALE_DAYS} días
+          </label>
+          {active && (
+            <button onClick={() => setFilters({ priceMin: "", priceMax: "", compraDesde: "", compraHasta: "", staleOnly: false })} style={{ width: "100%", background: "#fff", border: "1px solid #D3D1C7", borderRadius: 10, padding: "8px 0", fontSize: 12, fontWeight: 600, color: "#5F5E5A", cursor: "pointer", fontFamily: "inherit" }}>
+              Limpiar filtros
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PhotoGallery({ photos, cat }) {
+  const [active, setActive] = useState(0);
+  if (!photos || photos.length === 0) {
+    return <div style={{ width: "100%", height: 120, borderRadius: 16, background: "#F7F6F3", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 52, marginBottom: 16 }}>{cat.icon}</div>;
+  }
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ width: "100%", height: 240, borderRadius: 16, overflow: "hidden", background: `url(${photos[active]}) center/cover no-repeat`, marginBottom: photos.length > 1 ? 8 : 0 }} />
+      {photos.length > 1 && (
+        <div style={{ display: "flex", gap: 6, overflowX: "auto", scrollbarWidth: "none" }}>
+          {photos.map((url, idx) => (
+            <button key={idx} onClick={() => setActive(idx)} style={{ flexShrink: 0, width: 56, height: 56, borderRadius: 10, overflow: "hidden", background: `url(${url}) center/cover no-repeat`, border: idx === active ? "2px solid #1D9E75" : "2px solid transparent", cursor: "pointer", padding: 0 }} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DetailView({ item, onEdit }) {
   const profit = item.precio_venta ? Number(item.precio_venta) - Number(item.precio_compra) : null;
   const cat = getCat(item.categoria);
+  const photos = item.fotos_urls || [];
+
+  const shareWhatsApp = () => {
+    const price = item.precio_venta || item.precio_compra;
+    const lines = [
+      `*${item.nombre}*`,
+      item.descripcion || "",
+      price ? `Precio: ${formatCurrency(price)}` : "",
+      photos[0] || "",
+    ].filter(Boolean);
+    const text = encodeURIComponent(lines.join("\n"));
+    window.open(`https://wa.me/?text=${text}`, "_blank");
+  };
+
   return (
     <div style={{ animation: "fadeIn 0.2s ease", paddingBottom: 30 }}>
-      {item.foto_url
-        ? <div style={{ width: "100%", height: 220, borderRadius: 16, overflow: "hidden", background: `url(${item.foto_url}) center/cover no-repeat`, marginBottom: 16 }} />
-        : <div style={{ width: "100%", height: 120, borderRadius: 16, background: "#F7F6F3", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 52, marginBottom: 16 }}>{cat.icon}</div>
-      }
+      <PhotoGallery photos={photos} cat={cat} />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
         <h2 style={{ fontSize: 21, fontWeight: 700, margin: 0, color: "#2C2C2A", flex: 1 }}>{item.nombre}</h2>
         <StatusBadge sold={!!item.fecha_venta} />
       </div>
-      <span style={{ display: "inline-block", fontSize: 12, background: "#F1EFE8", color: "#5F5E5A", padding: "3px 10px", borderRadius: 8, fontWeight: 500, marginBottom: 10 }}>{cat.icon} {cat.label}</span>
+      <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 12, background: "#F1EFE8", color: "#5F5E5A", padding: "3px 10px", borderRadius: 8, fontWeight: 500 }}>{cat.icon} {cat.label}</span>
+        {!item.fecha_venta && staleDays(item) >= STALE_DAYS && <StaleChip days={staleDays(item)} />}
+      </div>
       {item.descripcion && <p style={{ fontSize: 14, color: "#5F5E5A", margin: "0 0 16px", lineHeight: 1.5 }}>{item.descripcion}</p>}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
         <div style={{ background: "#F7F6F3", borderRadius: 12, padding: "12px" }}>
@@ -487,6 +588,15 @@ function DetailView({ item, onEdit }) {
           </div>
         ))}
       </div>
+      {item.fecha_venta && (item.comprador_nombre || item.comprador_telefono) && (
+        <div style={{ marginTop: 16 }}>
+          <p style={{ fontSize: 13, fontWeight: 600, color: "#5F5E5A", margin: "0 0 8px" }}>Comprador</p>
+          <div style={{ background: "#F7F6F3", borderRadius: 12, padding: "12px 14px" }}>
+            {item.comprador_nombre && <div style={{ fontSize: 14, fontWeight: 600, color: "#2C2C2A" }}>{item.comprador_nombre}</div>}
+            {item.comprador_telefono && <div style={{ fontSize: 13, color: "#5F5E5A", marginTop: 2 }}>📞 {item.comprador_telefono}</div>}
+          </div>
+        </div>
+      )}
       {item.fecha_venta && item.metodo_pago && (() => {
         const m = getMetodo(item.metodo_pago);
         const rows = item.metodo_pago === "cheque" ? [
@@ -494,7 +604,6 @@ function DetailView({ item, onEdit }) {
           { label: "Nº cheque", value: item.cheque_numero },
           { label: "Monto del cheque", value: item.cheque_monto ? formatCurrency(item.cheque_monto) : null },
           { label: "Fecha de cobro", value: item.cheque_fecha_cobro ? formatDate(item.cheque_fecha_cobro) : null },
-          { label: "Titular", value: item.cheque_titular },
         ].filter((r) => r.value) : item.metodo_pago === "transferencia" && item.pago_nota ? [
           { label: "Referencia", value: item.pago_nota },
         ] : [];
@@ -516,7 +625,10 @@ function DetailView({ item, onEdit }) {
           </div>
         );
       })()}
-      <button onClick={onEdit} style={{ width: "100%", background: "#2C2C2A", color: "#fff", border: "none", borderRadius: 14, padding: "14px 0", fontSize: 16, fontWeight: 600, cursor: "pointer", marginTop: 20, minHeight: 48 }}>Editar producto</button>
+      <button onClick={shareWhatsApp} style={{ width: "100%", background: "#25D366", color: "#fff", border: "none", borderRadius: 14, padding: "14px 0", fontSize: 15, fontWeight: 600, cursor: "pointer", marginTop: 20, minHeight: 48, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+        <span style={{ fontSize: 18 }}>💬</span> Compartir por WhatsApp
+      </button>
+      <button onClick={onEdit} style={{ width: "100%", background: "#2C2C2A", color: "#fff", border: "none", borderRadius: 14, padding: "14px 0", fontSize: 16, fontWeight: 600, cursor: "pointer", marginTop: 10, minHeight: 48 }}>Editar producto</button>
     </div>
   );
 }
@@ -526,7 +638,7 @@ function HistorialView({ items }) {
   const [hasta, setHasta] = useState("");
   const [catFiltro, setCatFiltro] = useState("todos");
 
-  const { vendidos, filtrados, meses, porMes, maxG, totalGanancia, usedCats } = useMemo(() => {
+  const { vendidos, filtrados, meses, porMes, totalGanancia, usedCats } = useMemo(() => {
     const vendidos = items.filter((i) => i.fecha_venta && i.precio_venta);
     const filtrados = vendidos.filter((i) => {
       if (desde && i.fecha_venta < desde) return false;
@@ -541,11 +653,10 @@ function HistorialView({ items }) {
       porMes[key].ganancia += Number(i.precio_venta) - Number(i.precio_compra);
       porMes[key].cantidad += 1;
     });
-    const meses = Object.keys(porMes).sort();
-    const maxG = Math.max(...meses.map((m) => Math.abs(porMes[m].ganancia)), 1);
+    const meses = Object.keys(porMes).sort().reverse();
     const totalGanancia = filtrados.reduce((s, i) => s + (Number(i.precio_venta) - Number(i.precio_compra)), 0);
     const usedCats = [...new Set(vendidos.map((i) => i.categoria).filter(Boolean))];
-    return { vendidos, filtrados, meses, porMes, maxG, totalGanancia, usedCats };
+    return { vendidos, filtrados, meses, porMes, totalGanancia, usedCats };
   }, [items, desde, hasta, catFiltro]);
 
   const filtradosSorted = useMemo(() => [...filtrados].sort((a, b) => b.fecha_venta.localeCompare(a.fecha_venta)), [filtrados]);
@@ -582,31 +693,30 @@ function HistorialView({ items }) {
       </div>
       {meses.length > 0 ? (
         <>
-          <div style={{ background: "#F7F6F3", borderRadius: 14, padding: "14px", marginBottom: 20 }}>
-            <p style={{ fontSize: 12, fontWeight: 600, color: "#5F5E5A", margin: "0 0 12px" }}>Ganancia por mes</p>
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 100, overflowX: "auto", paddingBottom: 4 }}>
-              {meses.map((m) => {
-                const g = porMes[m].ganancia;
-                const pct = Math.max((Math.abs(g) / maxG) * 100, 4);
-                const [yyyy, mm] = m.split("-");
-                return (
-                  <div key={m} style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: 40, flex: 1 }}>
-                    <span style={{ fontSize: 9, color: "#888780", marginBottom: 2, fontWeight: 600, textAlign: "center" }}>{formatCurrencyShort(g)}</span>
-                    <div style={{ width: "100%", height: `${pct}%`, background: g >= 0 ? "#1D9E75" : "#E24B4A", borderRadius: "4px 4px 0 0", minHeight: 4 }} />
-                    <span style={{ fontSize: 9, color: "#888780", marginTop: 3, textAlign: "center" }}>{monthLabel(yyyy, mm)}</span>
+          <p style={{ fontSize: 13, fontWeight: 600, color: "#5F5E5A", margin: "0 0 8px" }}>Por mes</p>
+          <div style={{ marginBottom: 20 }}>
+            {meses.slice(0, 12).map((m) => {
+              const g = porMes[m].ganancia;
+              return (
+                <div key={m} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "#F7F6F3", borderRadius: 10, marginBottom: 6 }}>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: "#2C2C2A" }}>{monthLabelFull(m)}</div>
+                    <div style={{ fontSize: 11, color: "#888780", marginTop: 1 }}>{porMes[m].cantidad} {porMes[m].cantidad === 1 ? "venta" : "ventas"}</div>
                   </div>
-                );
-              })}
-            </div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: g >= 0 ? "#0F6E56" : "#A32D2D" }}>{g >= 0 ? "+" : ""}{formatCurrency(g)}</div>
+                </div>
+              );
+            })}
           </div>
           <p style={{ fontSize: 13, fontWeight: 600, color: "#5F5E5A", margin: "0 0 8px" }}>Detalle de ventas</p>
           {filtradosSorted.map((item) => {
             const g = Number(item.precio_venta) - Number(item.precio_compra);
             const cat = getCat(item.categoria);
+            const foto = firstPhoto(item);
             return (
               <div key={item.id} style={{ display: "flex", gap: 10, padding: "11px 0", borderBottom: "1px solid #F1EFE8", alignItems: "center" }}>
-                <div style={{ width: 44, height: 44, minWidth: 44, borderRadius: 8, overflow: "hidden", background: item.foto_url ? `url(${item.foto_url}) center/cover no-repeat` : "#F7F6F3", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>
-                  {!item.foto_url && cat.icon}
+                <div style={{ width: 44, height: 44, minWidth: 44, borderRadius: 8, overflow: "hidden", background: foto ? `url(${foto}) center/cover no-repeat` : "#F7F6F3", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>
+                  {!foto && cat.icon}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <p style={{ fontSize: 13, fontWeight: 600, margin: 0, color: "#2C2C2A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.nombre}</p>
@@ -711,6 +821,7 @@ function InventoryApp({ session }) {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("todos");
   const [filterCat, setFilterCat] = useState("todos");
+  const [advFilters, setAdvFilters] = useState({ priceMin: "", priceMax: "", compraDesde: "", compraHasta: "", staleOnly: false });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
@@ -796,13 +907,20 @@ function InventoryApp({ session }) {
 
   const filtered = useMemo(() => {
     const q = normalize(search);
+    const pmin = Number(advFilters.priceMin) || null;
+    const pmax = Number(advFilters.priceMax) || null;
     return items.filter((i) => {
       const ms = !q || normalize(i.nombre).includes(q) || normalize(i.ubicacion).includes(q);
       const mf = filterStatus === "todos" || (filterStatus === "stock" && !i.fecha_venta) || (filterStatus === "vendidos" && !!i.fecha_venta);
       const mc = filterCat === "todos" || i.categoria === filterCat;
-      return ms && mf && mc;
+      const mpMin = pmin == null || Number(i.precio_compra) >= pmin;
+      const mpMax = pmax == null || Number(i.precio_compra) <= pmax;
+      const mdDesde = !advFilters.compraDesde || (i.fecha_compra && i.fecha_compra >= advFilters.compraDesde);
+      const mdHasta = !advFilters.compraHasta || (i.fecha_compra && i.fecha_compra <= advFilters.compraHasta);
+      const mStale = !advFilters.staleOnly || (!i.fecha_venta && staleDays(i) >= STALE_DAYS);
+      return ms && mf && mc && mpMin && mpMax && mdDesde && mdHasta && mStale;
     });
-  }, [items, search, filterStatus, filterCat]);
+  }, [items, search, filterStatus, filterCat, advFilters]);
 
   const navBack = () => {
     if (view === "form" && selected) { setView("detail"); setEditing(null); }
@@ -876,6 +994,7 @@ function InventoryApp({ session }) {
                   </button>
                 ))}
               </div>
+              <AdvancedFilters filters={advFilters} setFilters={setAdvFilters} />
               {filtered.length === 0
                 ? <p style={{ textAlign: "center", color: "#888780", padding: "2rem 0", fontSize: 14 }}>Sin resultados</p>
                 : <div>{filtered.map((item) => <ProductCard key={item.id} item={item} onClick={() => { setSelected(item); setView("detail"); }} />)}</div>

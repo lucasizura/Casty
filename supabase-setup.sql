@@ -15,8 +15,16 @@ CREATE TABLE IF NOT EXISTS productos (
   ubicacion TEXT DEFAULT '',
   fecha_compra DATE,
   fecha_venta DATE,
-  foto_url TEXT DEFAULT '',
+  fotos_urls TEXT[] DEFAULT '{}'::TEXT[],
   deleted_at TIMESTAMPTZ,
+  metodo_pago TEXT,
+  pago_nota TEXT,
+  cheque_banco TEXT,
+  cheque_numero TEXT,
+  cheque_monto NUMERIC(12,2),
+  cheque_fecha_cobro DATE,
+  comprador_nombre TEXT,
+  comprador_telefono TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -30,7 +38,22 @@ ALTER TABLE productos ADD COLUMN IF NOT EXISTS cheque_banco TEXT;
 ALTER TABLE productos ADD COLUMN IF NOT EXISTS cheque_numero TEXT;
 ALTER TABLE productos ADD COLUMN IF NOT EXISTS cheque_monto NUMERIC(12,2);
 ALTER TABLE productos ADD COLUMN IF NOT EXISTS cheque_fecha_cobro DATE;
-ALTER TABLE productos ADD COLUMN IF NOT EXISTS cheque_titular TEXT;
+ALTER TABLE productos ADD COLUMN IF NOT EXISTS fotos_urls TEXT[] DEFAULT '{}'::TEXT[];
+ALTER TABLE productos ADD COLUMN IF NOT EXISTS comprador_nombre TEXT;
+ALTER TABLE productos ADD COLUMN IF NOT EXISTS comprador_telefono TEXT;
+
+-- Migracion de foto_url (columna vieja) a fotos_urls, luego drop
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'productos' AND column_name = 'foto_url') THEN
+    UPDATE productos SET fotos_urls = ARRAY[foto_url]
+      WHERE foto_url IS NOT NULL AND foto_url <> ''
+        AND (fotos_urls IS NULL OR array_length(fotos_urls, 1) IS NULL);
+    ALTER TABLE productos DROP COLUMN foto_url;
+  END IF;
+END $$;
+
+-- Quitar cheque_titular si existia (ya no lo usamos)
+ALTER TABLE productos DROP COLUMN IF EXISTS cheque_titular;
 
 -- Indice para busqueda
 CREATE INDEX IF NOT EXISTS idx_productos_nombre ON productos USING gin(to_tsvector('spanish', nombre));
