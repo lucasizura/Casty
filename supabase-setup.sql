@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS productos (
   cheque_fecha_cobro DATE,
   comprador_nombre TEXT,
   comprador_telefono TEXT,
+  cheque_titular TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -41,6 +42,7 @@ ALTER TABLE productos ADD COLUMN IF NOT EXISTS cheque_fecha_cobro DATE;
 ALTER TABLE productos ADD COLUMN IF NOT EXISTS fotos_urls TEXT[] DEFAULT '{}'::TEXT[];
 ALTER TABLE productos ADD COLUMN IF NOT EXISTS comprador_nombre TEXT;
 ALTER TABLE productos ADD COLUMN IF NOT EXISTS comprador_telefono TEXT;
+ALTER TABLE productos ADD COLUMN IF NOT EXISTS cheque_titular TEXT;
 
 -- Migracion de foto_url (columna vieja) a fotos_urls, luego drop
 DO $$ BEGIN
@@ -52,8 +54,6 @@ DO $$ BEGIN
   END IF;
 END $$;
 
--- Quitar cheque_titular si existia (ya no lo usamos)
-ALTER TABLE productos DROP COLUMN IF EXISTS cheque_titular;
 
 -- Indice para busqueda
 CREATE INDEX IF NOT EXISTS idx_productos_nombre ON productos USING gin(to_tsvector('spanish', nombre));

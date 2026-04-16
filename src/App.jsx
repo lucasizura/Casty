@@ -299,6 +299,7 @@ function SellForm({ item, onSave, saving, onError, isEdit }) {
     cheque_numero: item?.cheque_numero || "",
     cheque_monto: item?.cheque_monto ?? "",
     cheque_fecha_cobro: item?.cheque_fecha_cobro || "",
+    cheque_titular: item?.cheque_titular || "",
   });
   const s = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
@@ -325,6 +326,7 @@ function SellForm({ item, onSave, saving, onError, isEdit }) {
       cheque_numero: f.metodo_pago === "cheque" ? (f.cheque_numero || null) : null,
       cheque_monto: f.metodo_pago === "cheque" && f.cheque_monto !== "" ? Number(f.cheque_monto) || 0 : null,
       cheque_fecha_cobro: f.metodo_pago === "cheque" ? (f.cheque_fecha_cobro || null) : null,
+      cheque_titular: f.metodo_pago === "cheque" ? (f.cheque_titular || null) : null,
     });
   };
 
@@ -375,6 +377,7 @@ function SellForm({ item, onSave, saving, onError, isEdit }) {
             <Field label="Monto ($)"><input style={inp} type="number" inputMode="numeric" value={f.cheque_monto} onChange={(e) => s("cheque_monto", e.target.value)} placeholder="0" /></Field>
           </div>
           <Field label="Fecha de cobro"><input style={inp} type="date" value={f.cheque_fecha_cobro} onChange={(e) => s("cheque_fecha_cobro", e.target.value)} /></Field>
+          <Field label="Titular / a nombre de (opcional)"><input style={inp} value={f.cheque_titular} onChange={(e) => s("cheque_titular", e.target.value)} placeholder="Ej: Juan Pérez" /></Field>
         </>
       )}
       <button disabled={saving} onClick={handleSave} style={{ width: "100%", background: saving ? "#9FE1CB" : "#1D9E75", color: "#fff", border: "none", borderRadius: 14, padding: "14px 0", fontSize: 16, fontWeight: 600, cursor: saving ? "default" : "pointer", marginTop: 8, minHeight: 48 }}>
@@ -700,6 +703,7 @@ function DetailView({ item, onEditProduct, onMarkSold, onEditSale, onUnsell }) {
         const m = getMetodo(item.metodo_pago);
         const rows = item.metodo_pago === "cheque" ? [
           { label: "Banco", value: item.cheque_banco },
+          { label: "Titular", value: item.cheque_titular },
           { label: "Nº cheque", value: item.cheque_numero },
           { label: "Monto del cheque", value: item.cheque_monto ? formatCurrency(item.cheque_monto) : null },
           { label: "Fecha de cobro", value: item.cheque_fecha_cobro ? formatDate(item.cheque_fecha_cobro) : null },
