@@ -24,6 +24,13 @@ CREATE TABLE IF NOT EXISTS productos (
 -- Columnas que puedan faltar en instalaciones previas
 ALTER TABLE productos ADD COLUMN IF NOT EXISTS categoria TEXT DEFAULT 'otros';
 ALTER TABLE productos ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+ALTER TABLE productos ADD COLUMN IF NOT EXISTS metodo_pago TEXT;
+ALTER TABLE productos ADD COLUMN IF NOT EXISTS pago_nota TEXT;
+ALTER TABLE productos ADD COLUMN IF NOT EXISTS cheque_banco TEXT;
+ALTER TABLE productos ADD COLUMN IF NOT EXISTS cheque_numero TEXT;
+ALTER TABLE productos ADD COLUMN IF NOT EXISTS cheque_monto NUMERIC(12,2);
+ALTER TABLE productos ADD COLUMN IF NOT EXISTS cheque_fecha_cobro DATE;
+ALTER TABLE productos ADD COLUMN IF NOT EXISTS cheque_titular TEXT;
 
 -- Indice para busqueda
 CREATE INDEX IF NOT EXISTS idx_productos_nombre ON productos USING gin(to_tsvector('spanish', nombre));
