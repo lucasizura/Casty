@@ -744,7 +744,7 @@ function BottomNav({ tab, setTab }) {
   return (
     <div style={{ position: "sticky", bottom: 0, background: "#fff", borderTop: "1px solid #F1EFE8", display: "flex", zIndex: 20, marginLeft: -16, marginRight: -16 }}>
       {[
-        { id: "list", label: "Inventario", icon: "📦" },
+        { id: "list", label: "Casty", icon: "📦" },
         { id: "historial", label: "Historial", icon: "📊" },
       ].map((t) => (
         <button key={t.id} onClick={() => setTab(t.id)} style={{ flex: 1, background: "none", border: "none", padding: "10px 0", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 2, fontFamily: "inherit" }}>
@@ -792,7 +792,7 @@ function AuthScreen() {
       `}</style>
       <div style={{ textAlign: "center", marginBottom: 32 }}>
         <div style={{ fontSize: 48, marginBottom: 8 }}>📦</div>
-        <h1 style={{ fontSize: 26, fontWeight: 700, margin: "0 0 4px", letterSpacing: -0.5 }}>Casty Inventario</h1>
+        <h1 style={{ fontSize: 26, fontWeight: 700, margin: "0 0 4px", letterSpacing: -0.5 }}>Casty</h1>
         <p style={{ fontSize: 14, color: "#888780", margin: 0 }}>{mode === "signin" ? "Iniciá sesión para continuar" : "Crear cuenta nueva"}</p>
       </div>
       <form onSubmit={submit}>
@@ -947,7 +947,7 @@ function InventoryApp({ session }) {
         {showingSubView ? (
           <button onClick={navBack} style={{ background: "none", border: "none", fontSize: 16, color: "#1D9E75", cursor: "pointer", padding: "8px 0", fontWeight: 600, fontFamily: "inherit", minHeight: 44, display: "flex", alignItems: "center" }}>‹ Volver</button>
         ) : (
-          <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0, letterSpacing: -0.5 }}>{isHistorial ? "Historial" : "Inventario"}</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0, letterSpacing: -0.5 }}>{isHistorial ? "Historial" : "Casty"}</h1>
         )}
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {!showingSubView && tab === "list" && items.length > 0 && (
@@ -978,7 +978,7 @@ function InventoryApp({ session }) {
           : items.length === 0 ? (
             <div style={{ textAlign: "center", padding: "4rem 1rem" }}>
               <div style={{ fontSize: 48, marginBottom: 14, opacity: 0.2 }}>📦</div>
-              <p style={{ fontSize: 18, fontWeight: 600, margin: "0 0 6px" }}>Inventario vacío</p>
+              <p style={{ fontSize: 18, fontWeight: 600, margin: "0 0 6px" }}>Casty vacío</p>
               <p style={{ fontSize: 14, color: "#888780", margin: "0 0 24px" }}>Agregá tu primer producto</p>
               <button onClick={() => setView("form")} style={{ background: "#1D9E75", color: "#fff", border: "none", borderRadius: 14, padding: "14px 32px", fontSize: 16, fontWeight: 600, cursor: "pointer", minHeight: 48 }}>+ Agregar producto</button>
             </div>
