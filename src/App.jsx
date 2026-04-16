@@ -270,7 +270,7 @@ function ProductForm({ item, onSave, onDelete, saving, onRequestDelete, onError 
       <Field label="Nombre del producto"><input style={inp} value={f.nombre} onChange={(e) => s("nombre", e.target.value)} placeholder="Ej: Reloj Longines 1940" /></Field>
       <CategoryPicker value={f.categoria} onChange={(v) => s("categoria", v)} />
       <Field label="Descripción"><textarea style={{ ...inp, minHeight: 65, resize: "vertical" }} value={f.descripcion} onChange={(e) => s("descripcion", e.target.value)} placeholder="Materiales, época, estado..." /></Field>
-      <Field label="Precio de compra ($)"><input style={inp} type="number" inputMode="numeric" value={f.precio_compra} onChange={(e) => s("precio_compra", e.target.value)} placeholder="0" /></Field>
+      <Field label="Precio de compra ($)"><input style={inp} type="number" inputMode="numeric" min="0" value={f.precio_compra} onChange={(e) => s("precio_compra", e.target.value)} placeholder="0" /></Field>
       <Field label="Ubicación"><input style={inp} value={f.ubicacion} onChange={(e) => s("ubicacion", e.target.value)} placeholder="Ej: Vitrina 3, Estante A" /></Field>
       <Field label="Fecha de compra"><input style={inp} type="date" value={f.fecha_compra} onChange={(e) => s("fecha_compra", e.target.value)} /></Field>
       <button disabled={saving} onClick={handleSave} style={{ width: "100%", background: saving ? "#9FE1CB" : "#1D9E75", color: "#fff", border: "none", borderRadius: 14, padding: "14px 0", fontSize: 16, fontWeight: 600, cursor: saving ? "default" : "pointer", marginTop: 8, minHeight: 48 }}>
@@ -345,7 +345,7 @@ function SellForm({ item, onSave, saving, onError, isEdit }) {
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <Field label="Fecha de venta"><input style={inp} type="date" value={f.fecha_venta} onChange={(e) => s("fecha_venta", e.target.value)} /></Field>
-        <Field label="Precio de venta ($)"><input style={inp} type="number" inputMode="numeric" value={f.precio_venta} onChange={(e) => s("precio_venta", e.target.value)} placeholder="0" /></Field>
+        <Field label="Precio de venta ($)"><input style={inp} type="number" inputMode="numeric" min="0" value={f.precio_venta} onChange={(e) => s("precio_venta", e.target.value)} placeholder="0" /></Field>
       </div>
       <Field label="Comprador (opcional)"><input style={inp} value={f.comprador_nombre} onChange={(e) => s("comprador_nombre", e.target.value)} placeholder="Ej: Juan Pérez" /></Field>
       <Field label="Teléfono (opcional)"><input style={inp} type="tel" inputMode="tel" value={f.comprador_telefono} onChange={(e) => s("comprador_telefono", e.target.value)} placeholder="Ej: 11 5555 1234" /></Field>
@@ -374,7 +374,7 @@ function SellForm({ item, onSave, saving, onError, isEdit }) {
           <Field label="Banco"><input style={inp} value={f.cheque_banco} onChange={(e) => s("cheque_banco", e.target.value)} placeholder="Ej: Galicia" /></Field>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <Field label="Nº cheque"><input style={inp} value={f.cheque_numero} onChange={(e) => s("cheque_numero", e.target.value)} placeholder="0000123" /></Field>
-            <Field label="Monto ($)"><input style={inp} type="number" inputMode="numeric" value={f.cheque_monto} onChange={(e) => s("cheque_monto", e.target.value)} placeholder="0" /></Field>
+            <Field label="Monto ($)"><input style={inp} type="number" inputMode="numeric" min="0" value={f.cheque_monto} onChange={(e) => s("cheque_monto", e.target.value)} placeholder="0" /></Field>
           </div>
           <Field label="Fecha de cobro"><input style={inp} type="date" value={f.cheque_fecha_cobro} onChange={(e) => s("cheque_fecha_cobro", e.target.value)} /></Field>
           <Field label="Titular / a nombre de (opcional)"><input style={inp} value={f.cheque_titular} onChange={(e) => s("cheque_titular", e.target.value)} placeholder="Ej: Juan Pérez" /></Field>
@@ -533,8 +533,8 @@ function StockAdvancedFilters({ filters, setFilters }) {
         <div style={{ background: "#F7F6F3", borderRadius: 12, padding: 12, marginTop: 6 }}>
           <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#5F5E5A", marginBottom: 4 }}>Precio compra</label>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-            <input type="number" inputMode="numeric" style={inp} placeholder="Desde ($)" value={filters.priceMin} onChange={(e) => setFilters({ ...filters, priceMin: e.target.value })} />
-            <input type="number" inputMode="numeric" style={inp} placeholder="Hasta ($)" value={filters.priceMax} onChange={(e) => setFilters({ ...filters, priceMax: e.target.value })} />
+            <input type="number" inputMode="numeric" min="0" style={inp} placeholder="Desde ($)" value={filters.priceMin} onChange={(e) => setFilters({ ...filters, priceMin: e.target.value })} />
+            <input type="number" inputMode="numeric" min="0" style={inp} placeholder="Hasta ($)" value={filters.priceMax} onChange={(e) => setFilters({ ...filters, priceMax: e.target.value })} />
           </div>
           <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#5F5E5A", marginBottom: 4 }}>Fecha de compra</label>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
