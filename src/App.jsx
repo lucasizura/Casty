@@ -35,6 +35,7 @@ const MAX_PHOTO_MB = 5;
 const MAX_PHOTOS = 4;
 const FETCH_LIMIT = 500;
 const STALE_DAYS = 90;
+const AUTH_EMAIL = "izuralucas@gmail.com";
 
 function formatCurrency(n) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n || 0);
@@ -774,8 +775,6 @@ function BottomNav({ tab, setTab }) {
 }
 
 function AuthScreen() {
-  const [mode, setMode] = useState("signin");
-  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -785,17 +784,10 @@ function AuthScreen() {
     setLoading(true);
     setMsg(null);
     try {
-      if (mode === "signin") {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.auth.signUp({ email, password });
-        if (error) throw error;
-        setMsg({ type: "success", text: "Cuenta creada. Revisá tu mail si Supabase pide confirmación, o ya podés iniciar sesión." });
-        setMode("signin");
-      }
+      const { error } = await supabase.auth.signInWithPassword({ email: AUTH_EMAIL, password });
+      if (error) throw error;
     } catch (err) {
-      setMsg({ type: "error", text: err.message || "Error de autenticación" });
+      setMsg({ type: "error", text: "Contraseña incorrecta" });
     }
     setLoading(false);
   };
@@ -809,21 +801,17 @@ function AuthScreen() {
       <div style={{ textAlign: "center", marginBottom: 32 }}>
         <div style={{ fontSize: 48, marginBottom: 8 }}>📦</div>
         <h1 style={{ fontSize: 26, fontWeight: 700, margin: "0 0 4px", letterSpacing: -0.5 }}>Casty</h1>
-        <p style={{ fontSize: 14, color: "#888780", margin: 0 }}>{mode === "signin" ? "Iniciá sesión para continuar" : "Crear cuenta nueva"}</p>
+        <p style={{ fontSize: 14, color: "#888780", margin: 0 }}>Ingresá la contraseña</p>
       </div>
       <form onSubmit={submit}>
-        <Field label="Email"><input type="email" style={inp} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tu@email.com" required autoComplete="email" /></Field>
-        <Field label="Contraseña"><input type="password" style={inp} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required minLength={6} autoComplete={mode === "signin" ? "current-password" : "new-password"} /></Field>
+        <Field label="Contraseña"><input type="password" style={inp} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required autoFocus autoComplete="current-password" /></Field>
         {msg && (
-          <div style={{ background: msg.type === "error" ? "#FCEBEB" : "#EAF3DE", color: msg.type === "error" ? "#A32D2D" : "#3B6D11", padding: "10px 12px", borderRadius: 10, fontSize: 13, fontWeight: 500, marginBottom: 12, lineHeight: 1.4 }}>{msg.text}</div>
+          <div style={{ background: "#FCEBEB", color: "#A32D2D", padding: "10px 12px", borderRadius: 10, fontSize: 13, fontWeight: 500, marginBottom: 12, lineHeight: 1.4 }}>{msg.text}</div>
         )}
         <button type="submit" disabled={loading} style={{ width: "100%", background: loading ? "#9FE1CB" : "#1D9E75", color: "#fff", border: "none", borderRadius: 14, padding: "14px 0", fontSize: 16, fontWeight: 600, cursor: loading ? "default" : "pointer", marginTop: 4, minHeight: 48 }}>
-          {loading ? "..." : mode === "signin" ? "Entrar" : "Crear cuenta"}
+          {loading ? "..." : "Entrar"}
         </button>
       </form>
-      <button type="button" onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setMsg(null); }} style={{ background: "none", border: "none", color: "#1D9E75", fontSize: 13, fontWeight: 600, cursor: "pointer", marginTop: 18, fontFamily: "inherit", textAlign: "center" }}>
-        {mode === "signin" ? "¿No tenés cuenta? Creá una" : "¿Ya tenés cuenta? Entrar"}
-      </button>
     </div>
   );
 }
