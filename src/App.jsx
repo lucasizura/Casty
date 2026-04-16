@@ -39,22 +39,10 @@ const STALE_DAYS = 90;
 function formatCurrency(n) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n || 0);
 }
-function formatCurrencyShort(n) {
-  const v = Number(n) || 0;
-  const abs = Math.abs(v);
-  const sign = v < 0 ? "-" : "";
-  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(abs >= 10_000_000 ? 0 : 1)}M`;
-  if (abs >= 1000) return `${sign}$${Math.round(abs / 1000)}k`;
-  return `${sign}$${Math.round(abs)}`;
-}
 function formatDate(d) {
   if (!d) return "—";
   const p = d.split("-");
   return `${p[2]}/${p[1]}/${p[0]}`;
-}
-function monthLabel(yyyy, mm) {
-  const names = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
-  return `${names[parseInt(mm) - 1]} ${String(yyyy).slice(2)}`;
 }
 function monthLabelFull(key) {
   const names = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -251,20 +239,115 @@ function MultiPhotoUpload({ photos, onChange, onError }) {
   );
 }
 
-function SaleSection({ f, s, showNote }) {
-  const metodo = f.metodo_pago || "efectivo";
+// ProductForm: solo datos del producto (sin venta). Se usa en "Nuevo" y "Editar" de Stock.
+function ProductForm({ item, onSave, onDelete, saving, onRequestDelete, onError }) {
+  const [f, setF] = useState({
+    nombre: item?.nombre || "",
+    descripcion: item?.descripcion || "",
+    precio_compra: item?.precio_compra ?? "",
+    ubicacion: item?.ubicacion || "",
+    fecha_compra: item?.fecha_compra || "",
+    fotos_urls: item?.fotos_urls || [],
+    categoria: item?.categoria || "otros",
+  });
+  const s = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+  const handleSave = () => {
+    if (!f.nombre.trim()) return onError("Ingresá un nombre para el producto");
+    onSave({
+      ...f,
+      id: item?.id,
+      precio_compra: Number(f.precio_compra) || 0,
+      fecha_compra: f.fecha_compra || null,
+      fotos_urls: f.fotos_urls || [],
+    });
+  };
+
   return (
-    <div style={{ background: "#F7F6F3", borderRadius: 14, padding: 14, marginBottom: 14 }}>
-      <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#5F5E5A", marginBottom: showNote ? 4 : 10 }}>Datos de la venta</label>
-      {showNote && (
-        <p style={{ fontSize: 11, color: "#888780", margin: "0 0 12px", lineHeight: 1.4 }}>
-          Estos datos se guardan cuando marques el producto como vendido (completando Fecha venta).
-        </p>
+    <div style={{ animation: "fadeIn 0.2s ease", paddingBottom: 30 }}>
+      <MultiPhotoUpload photos={f.fotos_urls} onChange={(v) => s("fotos_urls", v)} onError={onError} />
+      <Field label="Nombre del producto"><input style={inp} value={f.nombre} onChange={(e) => s("nombre", e.target.value)} placeholder="Ej: Reloj Longines 1940" /></Field>
+      <CategoryPicker value={f.categoria} onChange={(v) => s("categoria", v)} />
+      <Field label="Descripción"><textarea style={{ ...inp, minHeight: 65, resize: "vertical" }} value={f.descripcion} onChange={(e) => s("descripcion", e.target.value)} placeholder="Materiales, época, estado..." /></Field>
+      <Field label="Precio de compra ($)"><input style={inp} type="number" inputMode="numeric" value={f.precio_compra} onChange={(e) => s("precio_compra", e.target.value)} placeholder="0" /></Field>
+      <Field label="Ubicación"><input style={inp} value={f.ubicacion} onChange={(e) => s("ubicacion", e.target.value)} placeholder="Ej: Vitrina 3, Estante A" /></Field>
+      <Field label="Fecha de compra"><input style={inp} type="date" value={f.fecha_compra} onChange={(e) => s("fecha_compra", e.target.value)} /></Field>
+      <button disabled={saving} onClick={handleSave} style={{ width: "100%", background: saving ? "#9FE1CB" : "#1D9E75", color: "#fff", border: "none", borderRadius: 14, padding: "14px 0", fontSize: 16, fontWeight: 600, cursor: saving ? "default" : "pointer", marginTop: 8, minHeight: 48 }}>
+        {saving ? "Guardando..." : item ? "Guardar cambios" : "Agregar a stock"}
+      </button>
+      {item && onDelete && (
+        <button disabled={saving} onClick={() => onRequestDelete(item)} style={{ width: "100%", background: "#FCEBEB", color: "#A32D2D", border: "none", borderRadius: 14, padding: "14px 0", fontSize: 15, fontWeight: 600, cursor: "pointer", marginTop: 10, minHeight: 48 }}>
+          Eliminar producto
+        </button>
       )}
+    </div>
+  );
+}
+
+// SellForm: solo datos de venta. Se usa al "Marcar como vendido" y al "Editar venta".
+function SellForm({ item, onSave, saving, onError, isEdit }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [f, setF] = useState({
+    fecha_venta: item?.fecha_venta || today,
+    precio_venta: item?.precio_venta ?? "",
+    comprador_nombre: item?.comprador_nombre || "",
+    comprador_telefono: item?.comprador_telefono || "",
+    metodo_pago: item?.metodo_pago || "efectivo",
+    pago_nota: item?.pago_nota || "",
+    cheque_banco: item?.cheque_banco || "",
+    cheque_numero: item?.cheque_numero || "",
+    cheque_monto: item?.cheque_monto ?? "",
+    cheque_fecha_cobro: item?.cheque_fecha_cobro || "",
+  });
+  const s = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+  const handleSave = () => {
+    if (!f.fecha_venta) return onError("Ingresá la fecha de venta");
+    const precioVenta = Number(f.precio_venta) || 0;
+    if (precioVenta <= 0) return onError("Ingresá el precio de venta");
+    if (item.fecha_compra && f.fecha_venta < item.fecha_compra) {
+      return onError("La fecha de venta no puede ser anterior a la de compra.");
+    }
+    if (f.metodo_pago === "cheque") {
+      if (!f.cheque_banco.trim()) return onError("Ingresá el banco del cheque.");
+      if (!f.cheque_fecha_cobro) return onError("Ingresá la fecha de cobro del cheque.");
+    }
+    onSave({
+      id: item.id,
+      fecha_venta: f.fecha_venta,
+      precio_venta: precioVenta,
+      comprador_nombre: f.comprador_nombre || null,
+      comprador_telefono: f.comprador_telefono || null,
+      metodo_pago: f.metodo_pago || "efectivo",
+      pago_nota: f.metodo_pago === "transferencia" ? (f.pago_nota || null) : null,
+      cheque_banco: f.metodo_pago === "cheque" ? (f.cheque_banco || null) : null,
+      cheque_numero: f.metodo_pago === "cheque" ? (f.cheque_numero || null) : null,
+      cheque_monto: f.metodo_pago === "cheque" && f.cheque_monto !== "" ? Number(f.cheque_monto) || 0 : null,
+      cheque_fecha_cobro: f.metodo_pago === "cheque" ? (f.cheque_fecha_cobro || null) : null,
+    });
+  };
+
+  const metodo = f.metodo_pago || "efectivo";
+
+  return (
+    <div style={{ animation: "fadeIn 0.2s ease", paddingBottom: 30 }}>
+      <div style={{ background: "#F7F6F3", borderRadius: 12, padding: "10px 14px", marginBottom: 16, display: "flex", gap: 10, alignItems: "center" }}>
+        <div style={{ width: 44, height: 44, minWidth: 44, borderRadius: 8, overflow: "hidden", background: firstPhoto(item) ? `url(${firstPhoto(item)}) center/cover no-repeat` : "#F1EFE8", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>
+          {!firstPhoto(item) && getCat(item.categoria).icon}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ fontSize: 14, fontWeight: 600, margin: 0, color: "#2C2C2A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.nombre}</p>
+          <p style={{ fontSize: 12, color: "#888780", margin: "2px 0 0" }}>Compra: {formatCurrency(item.precio_compra)}</p>
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <Field label="Fecha de venta"><input style={inp} type="date" value={f.fecha_venta} onChange={(e) => s("fecha_venta", e.target.value)} /></Field>
+        <Field label="Precio de venta ($)"><input style={inp} type="number" inputMode="numeric" value={f.precio_venta} onChange={(e) => s("precio_venta", e.target.value)} placeholder="0" /></Field>
+      </div>
       <Field label="Comprador (opcional)"><input style={inp} value={f.comprador_nombre} onChange={(e) => s("comprador_nombre", e.target.value)} placeholder="Ej: Juan Pérez" /></Field>
-      <Field label="Teléfono del comprador (opcional)"><input style={inp} type="tel" inputMode="tel" value={f.comprador_telefono} onChange={(e) => s("comprador_telefono", e.target.value)} placeholder="Ej: 11 5555 1234" /></Field>
-      <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#5F5E5A", marginBottom: 6 }}>Método de pago</label>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: metodo !== "efectivo" ? 14 : 0 }}>
+      <Field label="Teléfono (opcional)"><input style={inp} type="tel" inputMode="tel" value={f.comprador_telefono} onChange={(e) => s("comprador_telefono", e.target.value)} placeholder="Ej: 11 5555 1234" /></Field>
+      <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#5F5E5A", marginBottom: 8 }}>Método de pago</label>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: metodo !== "efectivo" ? 14 : 14 }}>
         {METODOS_PAGO.map((m) => (
           <button key={m.id} type="button" onClick={() => s("metodo_pago", m.id)} style={{
             background: metodo === m.id ? "#E1F5EE" : "#fff",
@@ -293,93 +376,9 @@ function SaleSection({ f, s, showNote }) {
           <Field label="Fecha de cobro"><input style={inp} type="date" value={f.cheque_fecha_cobro} onChange={(e) => s("cheque_fecha_cobro", e.target.value)} /></Field>
         </>
       )}
-    </div>
-  );
-}
-
-function ProductForm({ item, onSave, onDelete, saving, onRequestDelete, onError }) {
-  const [f, setF] = useState({
-    nombre: item?.nombre || "",
-    descripcion: item?.descripcion || "",
-    precio_compra: item?.precio_compra ?? "",
-    precio_venta: item?.precio_venta ?? "",
-    ubicacion: item?.ubicacion || "",
-    fecha_compra: item?.fecha_compra || "",
-    fecha_venta: item?.fecha_venta || "",
-    fotos_urls: item?.fotos_urls || [],
-    categoria: item?.categoria || "otros",
-    metodo_pago: item?.metodo_pago || "efectivo",
-    pago_nota: item?.pago_nota || "",
-    cheque_banco: item?.cheque_banco || "",
-    cheque_numero: item?.cheque_numero || "",
-    cheque_monto: item?.cheque_monto ?? "",
-    cheque_fecha_cobro: item?.cheque_fecha_cobro || "",
-    comprador_nombre: item?.comprador_nombre || "",
-    comprador_telefono: item?.comprador_telefono || "",
-  });
-  const s = (k, v) => setF((p) => ({ ...p, [k]: v }));
-
-  const handleSave = () => {
-    if (!f.nombre.trim()) return onError("Ingresá un nombre para el producto");
-    const precioVenta = Number(f.precio_venta) || 0;
-    const hasFechaVenta = !!f.fecha_venta;
-    const hasPrecioVenta = precioVenta > 0;
-    if (hasFechaVenta !== hasPrecioVenta) {
-      return onError("Completá fecha y precio de venta, o dejá ambos vacíos.");
-    }
-    if (f.fecha_compra && f.fecha_venta && f.fecha_venta < f.fecha_compra) {
-      return onError("La fecha de venta no puede ser anterior a la de compra.");
-    }
-    if (hasFechaVenta && f.metodo_pago === "cheque") {
-      if (!f.cheque_banco.trim()) return onError("Ingresá el banco del cheque.");
-      if (!f.cheque_fecha_cobro) return onError("Ingresá la fecha de cobro del cheque.");
-    }
-    const isSold = !!f.fecha_venta;
-    onSave({
-      ...f,
-      id: item?.id,
-      precio_compra: Number(f.precio_compra) || 0,
-      precio_venta: precioVenta,
-      fecha_compra: f.fecha_compra || null,
-      fecha_venta: f.fecha_venta || null,
-      fotos_urls: f.fotos_urls || [],
-      metodo_pago: isSold ? (f.metodo_pago || "efectivo") : null,
-      pago_nota: isSold && f.metodo_pago === "transferencia" ? (f.pago_nota || null) : null,
-      cheque_banco: isSold && f.metodo_pago === "cheque" ? (f.cheque_banco || null) : null,
-      cheque_numero: isSold && f.metodo_pago === "cheque" ? (f.cheque_numero || null) : null,
-      cheque_monto: isSold && f.metodo_pago === "cheque" && f.cheque_monto !== "" ? Number(f.cheque_monto) || 0 : null,
-      cheque_fecha_cobro: isSold && f.metodo_pago === "cheque" ? (f.cheque_fecha_cobro || null) : null,
-      comprador_nombre: isSold ? (f.comprador_nombre || null) : null,
-      comprador_telefono: isSold ? (f.comprador_telefono || null) : null,
-    });
-  };
-
-  return (
-    <div style={{ animation: "fadeIn 0.2s ease", paddingBottom: 30 }}>
-      <MultiPhotoUpload photos={f.fotos_urls} onChange={(v) => s("fotos_urls", v)} onError={onError} />
-      <div>
-        <Field label="Nombre del producto"><input style={inp} value={f.nombre} onChange={(e) => s("nombre", e.target.value)} placeholder="Ej: Reloj Longines 1940" /></Field>
-        <CategoryPicker value={f.categoria} onChange={(v) => s("categoria", v)} />
-        <Field label="Descripción"><textarea style={{ ...inp, minHeight: 65, resize: "vertical" }} value={f.descripcion} onChange={(e) => s("descripcion", e.target.value)} placeholder="Materiales, época, estado..." /></Field>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <Field label="Precio compra ($)"><input style={inp} type="number" inputMode="numeric" value={f.precio_compra} onChange={(e) => s("precio_compra", e.target.value)} placeholder="0" /></Field>
-          <Field label="Precio venta ($)"><input style={inp} type="number" inputMode="numeric" value={f.precio_venta} onChange={(e) => s("precio_venta", e.target.value)} placeholder="0" /></Field>
-        </div>
-        <Field label="Ubicación"><input style={inp} value={f.ubicacion} onChange={(e) => s("ubicacion", e.target.value)} placeholder="Ej: Vitrina 3, Estante A" /></Field>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <Field label="Fecha compra"><input style={inp} type="date" value={f.fecha_compra} onChange={(e) => s("fecha_compra", e.target.value)} /></Field>
-          <Field label="Fecha venta"><input style={inp} type="date" value={f.fecha_venta} onChange={(e) => s("fecha_venta", e.target.value)} /></Field>
-        </div>
-        <SaleSection f={f} s={s} showNote={!f.fecha_venta} />
-      </div>
       <button disabled={saving} onClick={handleSave} style={{ width: "100%", background: saving ? "#9FE1CB" : "#1D9E75", color: "#fff", border: "none", borderRadius: 14, padding: "14px 0", fontSize: 16, fontWeight: 600, cursor: saving ? "default" : "pointer", marginTop: 8, minHeight: 48 }}>
-        {saving ? "Guardando..." : item ? "Guardar cambios" : "Agregar producto"}
+        {saving ? "Guardando..." : isEdit ? "Guardar cambios de venta" : "Confirmar venta"}
       </button>
-      {item && onDelete && (
-        <button disabled={saving} onClick={() => onRequestDelete(item)} style={{ width: "100%", background: "#FCEBEB", color: "#A32D2D", border: "none", borderRadius: 14, padding: "14px 0", fontSize: 15, fontWeight: 600, cursor: "pointer", marginTop: 10, minHeight: 48 }}>
-          Eliminar producto
-        </button>
-      )}
     </div>
   );
 }
@@ -397,16 +396,22 @@ function ProductCard({ item, onClick }) {
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
           <p style={{ fontSize: 15, fontWeight: 600, margin: 0, color: "#2C2C2A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.nombre}</p>
-          <StatusBadge sold={!!item.fecha_venta} />
+          {item.fecha_venta ? (
+            <span style={{ fontSize: 11, color: "#888780", whiteSpace: "nowrap" }}>{formatDate(item.fecha_venta)}</span>
+          ) : (
+            stale >= STALE_DAYS && <StaleChip days={stale} />
+          )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "2px 0", flexWrap: "wrap" }}>
           <span style={{ fontSize: 11, background: "#F1EFE8", color: "#5F5E5A", padding: "2px 7px", borderRadius: 6, fontWeight: 500 }}>{cat.icon} {cat.label}</span>
-          {item.ubicacion && <span style={{ fontSize: 11, color: "#888780" }}>· {item.ubicacion}</span>}
-          {stale >= STALE_DAYS && <StaleChip days={stale} />}
+          {item.ubicacion && !item.fecha_venta && <span style={{ fontSize: 11, color: "#888780" }}>· {item.ubicacion}</span>}
+          {item.fecha_venta && item.metodo_pago && <span style={{ fontSize: 11, color: "#888780" }}>· {getMetodo(item.metodo_pago)?.icon} {getMetodo(item.metodo_pago)?.label}</span>}
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 2 }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: "#1D9E75" }}>{formatCurrency(item.precio_compra)}</span>
-          {profit !== null && <span style={{ fontSize: 12, fontWeight: 600, color: profit >= 0 ? "#3B6D11" : "#A32D2D" }}>{profit >= 0 ? "+" : ""}{formatCurrency(profit)}</span>}
+          <span style={{ fontSize: 14, fontWeight: 700, color: "#2C2C2A" }}>
+            {item.fecha_venta ? formatCurrency(item.precio_venta) : formatCurrency(item.precio_compra)}
+          </span>
+          {profit !== null && <span style={{ fontSize: 12, fontWeight: 600, color: profit >= 0 ? "#0F6E56" : "#A32D2D" }}>{profit >= 0 ? "+" : ""}{formatCurrency(profit)}</span>}
         </div>
       </div>
       <div style={{ display: "flex", alignItems: "center", color: "#D3D1C7", fontSize: 18 }}>›</div>
@@ -414,42 +419,25 @@ function ProductCard({ item, onClick }) {
   );
 }
 
-function Stats({ items }) {
+function StockStats({ items }) {
   const stats = useMemo(() => {
     const stock = items.filter((i) => !i.fecha_venta);
-    const vendidos = items.filter((i) => !!i.fecha_venta);
     const invertido = stock.reduce((s, i) => s + (Number(i.precio_compra) || 0), 0);
-    const ganancia = vendidos.filter((i) => i.precio_venta).reduce((s, i) => s + (Number(i.precio_venta) - Number(i.precio_compra)), 0);
-    const today = new Date().toISOString().slice(0, 10);
-    const chequesPend = items.filter((i) => i.metodo_pago === "cheque" && i.cheque_fecha_cobro && i.cheque_fecha_cobro >= today);
-    const chequesMonto = chequesPend.reduce((s, i) => s + (Number(i.cheque_monto) || Number(i.precio_venta) || 0), 0);
-    const staleCount = items.filter((i) => !i.fecha_venta && staleDays(i) >= STALE_DAYS).length;
-    return { stock: stock.length, vendidos: vendidos.length, invertido, ganancia, chequesCount: chequesPend.length, chequesMonto, staleCount };
+    const staleCount = stock.filter((i) => staleDays(i) >= STALE_DAYS).length;
+    return { count: stock.length, invertido, staleCount };
   }, [items]);
   return (
     <>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: (stats.chequesCount > 0 || stats.staleCount > 0) ? 8 : 16 }}>
-        {[
-          { label: "En stock", value: stats.stock, color: "#185FA5" },
-          { label: "Vendidos", value: stats.vendidos, color: "#3B6D11" },
-          { label: "Invertido (stock)", value: formatCurrency(stats.invertido), color: "#854F0B" },
-          { label: "Ganancia", value: formatCurrency(stats.ganancia), color: stats.ganancia >= 0 ? "#0F6E56" : "#A32D2D" },
-        ].map((d) => (
-          <div key={d.label} style={{ background: "#F7F6F3", borderRadius: 12, padding: "10px 12px" }}>
-            <div style={{ fontSize: 11, color: "#888780", marginBottom: 2 }}>{d.label}</div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: d.color }}>{d.value}</div>
-          </div>
-        ))}
-      </div>
-      {stats.chequesCount > 0 && (
-        <div style={{ background: "#FFF7E6", border: "1px solid #F5E3B8", borderRadius: 12, padding: "10px 14px", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <div style={{ fontSize: 11, color: "#854F0B", marginBottom: 2, fontWeight: 600 }}>📄 Cheques por cobrar</div>
-            <div style={{ fontSize: 12, color: "#854F0B" }}>{stats.chequesCount} {stats.chequesCount === 1 ? "cheque pendiente" : "cheques pendientes"}</div>
-          </div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: "#854F0B" }}>{formatCurrency(stats.chequesMonto)}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: stats.staleCount > 0 ? 8 : 16 }}>
+        <div style={{ background: "#F7F6F3", borderRadius: 12, padding: "10px 12px" }}>
+          <div style={{ fontSize: 11, color: "#888780", marginBottom: 2 }}>En stock</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: "#185FA5" }}>{stats.count}</div>
         </div>
-      )}
+        <div style={{ background: "#F7F6F3", borderRadius: 12, padding: "10px 12px" }}>
+          <div style={{ fontSize: 11, color: "#888780", marginBottom: 2 }}>Invertido</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#854F0B" }}>{formatCurrency(stats.invertido)}</div>
+        </div>
+      </div>
       {stats.staleCount > 0 && (
         <div style={{ background: "#FFF1E0", border: "1px solid #F5D7B8", borderRadius: 12, padding: "10px 14px", marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
@@ -458,7 +446,58 @@ function Stats({ items }) {
           </div>
         </div>
       )}
-      {(stats.chequesCount === 0 && stats.staleCount === 0) ? null : null}
+    </>
+  );
+}
+
+function SalesStats({ items, porMes, meses }) {
+  const stats = useMemo(() => {
+    const ganancia = items.reduce((s, i) => s + (Number(i.precio_venta) - Number(i.precio_compra)), 0);
+    const today = new Date().toISOString().slice(0, 10);
+    const chequesPend = items.filter((i) => i.metodo_pago === "cheque" && i.cheque_fecha_cobro && i.cheque_fecha_cobro >= today);
+    const chequesMonto = chequesPend.reduce((s, i) => s + (Number(i.cheque_monto) || Number(i.precio_venta) || 0), 0);
+    return { count: items.length, ganancia, chequesCount: chequesPend.length, chequesMonto };
+  }, [items]);
+  return (
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: stats.chequesCount > 0 ? 8 : 16 }}>
+        <div style={{ background: "#F7F6F3", borderRadius: 12, padding: "10px 12px" }}>
+          <div style={{ fontSize: 11, color: "#888780", marginBottom: 2 }}>Ventas (filtradas)</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: "#3B6D11" }}>{stats.count}</div>
+        </div>
+        <div style={{ background: "#F7F6F3", borderRadius: 12, padding: "10px 12px" }}>
+          <div style={{ fontSize: 11, color: "#888780", marginBottom: 2 }}>Ganancia</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: stats.ganancia >= 0 ? "#0F6E56" : "#A32D2D" }}>{formatCurrency(stats.ganancia)}</div>
+        </div>
+      </div>
+      {stats.chequesCount > 0 && (
+        <div style={{ background: "#FFF7E6", border: "1px solid #F5E3B8", borderRadius: 12, padding: "10px 14px", marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 11, color: "#854F0B", marginBottom: 2, fontWeight: 600 }}>📄 Cheques por cobrar</div>
+            <div style={{ fontSize: 12, color: "#854F0B" }}>{stats.chequesCount} {stats.chequesCount === 1 ? "cheque pendiente" : "cheques pendientes"}</div>
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#854F0B" }}>{formatCurrency(stats.chequesMonto)}</div>
+        </div>
+      )}
+      {meses.length > 0 && (
+        <details style={{ background: "#F7F6F3", borderRadius: 12, padding: "8px 12px", marginBottom: 16 }}>
+          <summary style={{ fontSize: 13, fontWeight: 600, color: "#5F5E5A", cursor: "pointer", padding: "4px 0" }}>Ganancia por mes</summary>
+          <div style={{ marginTop: 8 }}>
+            {meses.slice(0, 12).map((m) => {
+              const g = porMes[m].ganancia;
+              return (
+                <div key={m} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #EEE" }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#2C2C2A" }}>{monthLabelFull(m)}</div>
+                    <div style={{ fontSize: 10, color: "#888780", marginTop: 1 }}>{porMes[m].cantidad} {porMes[m].cantidad === 1 ? "venta" : "ventas"}</div>
+                  </div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: g >= 0 ? "#0F6E56" : "#A32D2D" }}>{g >= 0 ? "+" : ""}{formatCurrency(g)}</div>
+                </div>
+              );
+            })}
+          </div>
+        </details>
+      )}
     </>
   );
 }
@@ -477,7 +516,7 @@ function CategoryFilter({ value, onChange, items }) {
   );
 }
 
-function AdvancedFilters({ filters, setFilters }) {
+function StockAdvancedFilters({ filters, setFilters }) {
   const [open, setOpen] = useState(false);
   const active = filters.priceMin || filters.priceMax || filters.compraDesde || filters.compraHasta || filters.staleOnly;
   return (
@@ -512,6 +551,59 @@ function AdvancedFilters({ filters, setFilters }) {
   );
 }
 
+function VendidosFilters({ filters, setFilters, items }) {
+  const [open, setOpen] = useState(false);
+  const active = filters.ventaDesde || filters.ventaHasta || filters.metodo !== "todos" || filters.categoria !== "todos";
+  const usedCats = useMemo(() => [...new Set(items.map((i) => i.categoria).filter(Boolean))], [items]);
+  return (
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+        <div>
+          <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#5F5E5A", marginBottom: 4 }}>Venta desde</label>
+          <input type="date" style={inp} value={filters.ventaDesde} onChange={(e) => setFilters({ ...filters, ventaDesde: e.target.value })} />
+        </div>
+        <div>
+          <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#5F5E5A", marginBottom: 4 }}>Venta hasta</label>
+          <input type="date" style={inp} value={filters.ventaHasta} onChange={(e) => setFilters({ ...filters, ventaHasta: e.target.value })} />
+        </div>
+      </div>
+      <div style={{ marginBottom: 10 }}>
+        <button onClick={() => setOpen((v) => !v)} style={{ width: "100%", background: (filters.metodo !== "todos" || filters.categoria !== "todos") ? "#E1F5EE" : "#F7F6F3", color: (filters.metodo !== "todos" || filters.categoria !== "todos") ? "#0F6E56" : "#5F5E5A", border: "none", borderRadius: 10, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>Más filtros</span>
+          <span>{open ? "▲" : "▼"}</span>
+        </button>
+        {open && (
+          <div style={{ background: "#F7F6F3", borderRadius: 12, padding: 12, marginTop: 6 }}>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#5F5E5A", marginBottom: 6 }}>Método de pago</label>
+            <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+              <button onClick={() => setFilters({ ...filters, metodo: "todos" })} style={{ background: filters.metodo === "todos" ? "#1D9E75" : "#fff", color: filters.metodo === "todos" ? "#fff" : "#5F5E5A", border: "1px solid #D3D1C7", borderRadius: 20, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Todos</button>
+              {METODOS_PAGO.map((m) => (
+                <button key={m.id} onClick={() => setFilters({ ...filters, metodo: m.id })} style={{ background: filters.metodo === m.id ? "#1D9E75" : "#fff", color: filters.metodo === m.id ? "#fff" : "#5F5E5A", border: "1px solid #D3D1C7", borderRadius: 20, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                  {m.icon} {m.label}
+                </button>
+              ))}
+            </div>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#5F5E5A", marginBottom: 6 }}>Categoría</label>
+            <div style={{ display: "flex", gap: 6, marginBottom: active ? 10 : 0, flexWrap: "wrap" }}>
+              <button onClick={() => setFilters({ ...filters, categoria: "todos" })} style={{ background: filters.categoria === "todos" ? "#1D9E75" : "#fff", color: filters.categoria === "todos" ? "#fff" : "#5F5E5A", border: "1px solid #D3D1C7", borderRadius: 20, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Todas</button>
+              {CATEGORIAS.filter((c) => usedCats.includes(c.id)).map((c) => (
+                <button key={c.id} onClick={() => setFilters({ ...filters, categoria: c.id })} style={{ background: filters.categoria === c.id ? "#1D9E75" : "#fff", color: filters.categoria === c.id ? "#fff" : "#5F5E5A", border: "1px solid #D3D1C7", borderRadius: 20, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                  {c.icon} {c.label}
+                </button>
+              ))}
+            </div>
+            {active && (
+              <button onClick={() => setFilters({ ventaDesde: "", ventaHasta: "", metodo: "todos", categoria: "todos" })} style={{ width: "100%", background: "#fff", border: "1px solid #D3D1C7", borderRadius: 10, padding: "8px 0", fontSize: 12, fontWeight: 600, color: "#5F5E5A", cursor: "pointer", fontFamily: "inherit" }}>
+                Limpiar filtros
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
 function PhotoGallery({ photos, cat }) {
   const [active, setActive] = useState(0);
   if (!photos || photos.length === 0) {
@@ -531,8 +623,9 @@ function PhotoGallery({ photos, cat }) {
   );
 }
 
-function DetailView({ item, onEdit }) {
-  const profit = item.precio_venta ? Number(item.precio_venta) - Number(item.precio_compra) : null;
+function DetailView({ item, onEditProduct, onMarkSold, onEditSale, onUnsell }) {
+  const isSold = !!item.fecha_venta;
+  const profit = isSold ? Number(item.precio_venta) - Number(item.precio_compra) : null;
   const cat = getCat(item.categoria);
   const photos = item.fotos_urls || [];
 
@@ -553,22 +646,25 @@ function DetailView({ item, onEdit }) {
       <PhotoGallery photos={photos} cat={cat} />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
         <h2 style={{ fontSize: 21, fontWeight: 700, margin: 0, color: "#2C2C2A", flex: 1 }}>{item.nombre}</h2>
-        <StatusBadge sold={!!item.fecha_venta} />
+        <StatusBadge sold={isSold} />
       </div>
       <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
         <span style={{ fontSize: 12, background: "#F1EFE8", color: "#5F5E5A", padding: "3px 10px", borderRadius: 8, fontWeight: 500 }}>{cat.icon} {cat.label}</span>
-        {!item.fecha_venta && staleDays(item) >= STALE_DAYS && <StaleChip days={staleDays(item)} />}
+        {!isSold && staleDays(item) >= STALE_DAYS && <StaleChip days={staleDays(item)} />}
       </div>
       {item.descripcion && <p style={{ fontSize: 14, color: "#5F5E5A", margin: "0 0 16px", lineHeight: 1.5 }}>{item.descripcion}</p>}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+
+      <div style={{ display: "grid", gridTemplateColumns: isSold ? "1fr 1fr" : "1fr", gap: 8, marginBottom: 10 }}>
         <div style={{ background: "#F7F6F3", borderRadius: 12, padding: "12px" }}>
           <div style={{ fontSize: 11, color: "#888780", marginBottom: 2 }}>Precio compra</div>
           <div style={{ fontSize: 18, fontWeight: 700, color: "#2C2C2A" }}>{formatCurrency(item.precio_compra)}</div>
         </div>
-        <div style={{ background: "#F7F6F3", borderRadius: 12, padding: "12px" }}>
-          <div style={{ fontSize: 11, color: "#888780", marginBottom: 2 }}>Precio venta</div>
-          <div style={{ fontSize: 18, fontWeight: 700, color: item.precio_venta ? "#1D9E75" : "#B4B2A9" }}>{item.precio_venta ? formatCurrency(item.precio_venta) : "—"}</div>
-        </div>
+        {isSold && (
+          <div style={{ background: "#F7F6F3", borderRadius: 12, padding: "12px" }}>
+            <div style={{ fontSize: 11, color: "#888780", marginBottom: 2 }}>Precio venta</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#1D9E75" }}>{formatCurrency(item.precio_venta)}</div>
+          </div>
+        )}
       </div>
       {profit !== null && (
         <div style={{ background: profit >= 0 ? "#EAF3DE" : "#FCEBEB", borderRadius: 12, padding: "10px 14px", display: "flex", justifyContent: "space-between", marginBottom: 14 }}>
@@ -588,7 +684,8 @@ function DetailView({ item, onEdit }) {
           </div>
         ))}
       </div>
-      {item.fecha_venta && (item.comprador_nombre || item.comprador_telefono) && (
+
+      {isSold && (item.comprador_nombre || item.comprador_telefono) && (
         <div style={{ marginTop: 16 }}>
           <p style={{ fontSize: 13, fontWeight: 600, color: "#5F5E5A", margin: "0 0 8px" }}>Comprador</p>
           <div style={{ background: "#F7F6F3", borderRadius: 12, padding: "12px 14px" }}>
@@ -597,7 +694,8 @@ function DetailView({ item, onEdit }) {
           </div>
         </div>
       )}
-      {item.fecha_venta && item.metodo_pago && (() => {
+
+      {isSold && item.metodo_pago && (() => {
         const m = getMetodo(item.metodo_pago);
         const rows = item.metodo_pago === "cheque" ? [
           { label: "Banco", value: item.cheque_banco },
@@ -625,116 +723,34 @@ function DetailView({ item, onEdit }) {
           </div>
         );
       })()}
-      <button onClick={shareWhatsApp} style={{ width: "100%", background: "#25D366", color: "#fff", border: "none", borderRadius: 14, padding: "14px 0", fontSize: 15, fontWeight: 600, cursor: "pointer", marginTop: 20, minHeight: 48, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-        <span style={{ fontSize: 18 }}>💬</span> Compartir por WhatsApp
-      </button>
-      <button onClick={onEdit} style={{ width: "100%", background: "#2C2C2A", color: "#fff", border: "none", borderRadius: 14, padding: "14px 0", fontSize: 16, fontWeight: 600, cursor: "pointer", marginTop: 10, minHeight: 48 }}>Editar producto</button>
-    </div>
-  );
-}
 
-function HistorialView({ items }) {
-  const [desde, setDesde] = useState("");
-  const [hasta, setHasta] = useState("");
-  const [catFiltro, setCatFiltro] = useState("todos");
-
-  const { vendidos, filtrados, meses, porMes, totalGanancia, usedCats } = useMemo(() => {
-    const vendidos = items.filter((i) => i.fecha_venta && i.precio_venta);
-    const filtrados = vendidos.filter((i) => {
-      if (desde && i.fecha_venta < desde) return false;
-      if (hasta && i.fecha_venta > hasta) return false;
-      if (catFiltro !== "todos" && i.categoria !== catFiltro) return false;
-      return true;
-    });
-    const porMes = {};
-    filtrados.forEach((i) => {
-      const key = i.fecha_venta.slice(0, 7);
-      if (!porMes[key]) porMes[key] = { ganancia: 0, cantidad: 0 };
-      porMes[key].ganancia += Number(i.precio_venta) - Number(i.precio_compra);
-      porMes[key].cantidad += 1;
-    });
-    const meses = Object.keys(porMes).sort().reverse();
-    const totalGanancia = filtrados.reduce((s, i) => s + (Number(i.precio_venta) - Number(i.precio_compra)), 0);
-    const usedCats = [...new Set(vendidos.map((i) => i.categoria).filter(Boolean))];
-    return { vendidos, filtrados, meses, porMes, totalGanancia, usedCats };
-  }, [items, desde, hasta, catFiltro]);
-
-  const filtradosSorted = useMemo(() => [...filtrados].sort((a, b) => b.fecha_venta.localeCompare(a.fecha_venta)), [filtrados]);
-
-  return (
-    <div style={{ animation: "fadeIn 0.2s ease", paddingBottom: 40 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
-        <div style={{ background: "#F7F6F3", borderRadius: 12, padding: "10px 12px" }}>
-          <div style={{ fontSize: 11, color: "#888780", marginBottom: 2 }}>Ventas</div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: "#185FA5" }}>{filtrados.length}</div>
-        </div>
-        <div style={{ background: "#F7F6F3", borderRadius: 12, padding: "10px 12px" }}>
-          <div style={{ fontSize: 11, color: "#888780", marginBottom: 2 }}>Ganancia total</div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: totalGanancia >= 0 ? "#0F6E56" : "#A32D2D" }}>{formatCurrency(totalGanancia)}</div>
-        </div>
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-        <div>
-          <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#5F5E5A", marginBottom: 4 }}>Desde</label>
-          <input type="date" style={inp} value={desde} onChange={(e) => setDesde(e.target.value)} />
-        </div>
-        <div>
-          <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#5F5E5A", marginBottom: 4 }}>Hasta</label>
-          <input type="date" style={inp} value={hasta} onChange={(e) => setHasta(e.target.value)} />
-        </div>
-      </div>
-      <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 8, marginBottom: 16, scrollbarWidth: "none" }}>
-        <button onClick={() => setCatFiltro("todos")} style={{ flexShrink: 0, background: catFiltro === "todos" ? "#1D9E75" : "#F7F6F3", color: catFiltro === "todos" ? "#fff" : "#5F5E5A", border: "none", borderRadius: 20, padding: "7px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Todas</button>
-        {CATEGORIAS.filter((c) => usedCats.includes(c.id)).map((c) => (
-          <button key={c.id} onClick={() => setCatFiltro(c.id)} style={{ flexShrink: 0, background: catFiltro === c.id ? "#1D9E75" : "#F7F6F3", color: catFiltro === c.id ? "#fff" : "#5F5E5A", border: "none", borderRadius: 20, padding: "7px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
-            {c.icon} {c.label}
-          </button>
-        ))}
-      </div>
-      {meses.length > 0 ? (
+      {!isSold ? (
         <>
-          <p style={{ fontSize: 13, fontWeight: 600, color: "#5F5E5A", margin: "0 0 8px" }}>Por mes</p>
-          <div style={{ marginBottom: 20 }}>
-            {meses.slice(0, 12).map((m) => {
-              const g = porMes[m].ganancia;
-              return (
-                <div key={m} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "#F7F6F3", borderRadius: 10, marginBottom: 6 }}>
-                  <div>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: "#2C2C2A" }}>{monthLabelFull(m)}</div>
-                    <div style={{ fontSize: 11, color: "#888780", marginTop: 1 }}>{porMes[m].cantidad} {porMes[m].cantidad === 1 ? "venta" : "ventas"}</div>
-                  </div>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: g >= 0 ? "#0F6E56" : "#A32D2D" }}>{g >= 0 ? "+" : ""}{formatCurrency(g)}</div>
-                </div>
-              );
-            })}
-          </div>
-          <p style={{ fontSize: 13, fontWeight: 600, color: "#5F5E5A", margin: "0 0 8px" }}>Detalle de ventas</p>
-          {filtradosSorted.map((item) => {
-            const g = Number(item.precio_venta) - Number(item.precio_compra);
-            const cat = getCat(item.categoria);
-            const foto = firstPhoto(item);
-            return (
-              <div key={item.id} style={{ display: "flex", gap: 10, padding: "11px 0", borderBottom: "1px solid #F1EFE8", alignItems: "center" }}>
-                <div style={{ width: 44, height: 44, minWidth: 44, borderRadius: 8, overflow: "hidden", background: foto ? `url(${foto}) center/cover no-repeat` : "#F7F6F3", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>
-                  {!foto && cat.icon}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ fontSize: 13, fontWeight: 600, margin: 0, color: "#2C2C2A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.nombre}</p>
-                  <p style={{ fontSize: 11, color: "#888780", margin: "1px 0 0" }}>{cat.icon} {cat.label} · {formatDate(item.fecha_venta)}</p>
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: g >= 0 ? "#0F6E56" : "#A32D2D" }}>{g >= 0 ? "+" : ""}{formatCurrency(g)}</div>
-                  <div style={{ fontSize: 11, color: "#888780" }}>{formatCurrency(item.precio_venta)}</div>
-                </div>
-              </div>
-            );
-          })}
+          <button onClick={onMarkSold} style={{ width: "100%", background: "#1D9E75", color: "#fff", border: "none", borderRadius: 14, padding: "14px 0", fontSize: 16, fontWeight: 700, cursor: "pointer", marginTop: 20, minHeight: 48, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            💰 Marcar como vendido
+          </button>
+          <button onClick={shareWhatsApp} style={{ width: "100%", background: "#25D366", color: "#fff", border: "none", borderRadius: 14, padding: "14px 0", fontSize: 15, fontWeight: 600, cursor: "pointer", marginTop: 10, minHeight: 48, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            <span style={{ fontSize: 18 }}>💬</span> Compartir por WhatsApp
+          </button>
+          <button onClick={onEditProduct} style={{ width: "100%", background: "#2C2C2A", color: "#fff", border: "none", borderRadius: 14, padding: "14px 0", fontSize: 16, fontWeight: 600, cursor: "pointer", marginTop: 10, minHeight: 48 }}>
+            Editar producto
+          </button>
         </>
       ) : (
-        <div style={{ textAlign: "center", padding: "3rem 0" }}>
-          <div style={{ fontSize: 40, opacity: 0.2, marginBottom: 10 }}>📊</div>
-          <p style={{ fontSize: 14, color: "#888780" }}>No hay ventas en este período</p>
-        </div>
+        <>
+          <button onClick={shareWhatsApp} style={{ width: "100%", background: "#25D366", color: "#fff", border: "none", borderRadius: 14, padding: "14px 0", fontSize: 15, fontWeight: 600, cursor: "pointer", marginTop: 20, minHeight: 48, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            <span style={{ fontSize: 18 }}>💬</span> Compartir por WhatsApp
+          </button>
+          <button onClick={onEditSale} style={{ width: "100%", background: "#2C2C2A", color: "#fff", border: "none", borderRadius: 14, padding: "14px 0", fontSize: 16, fontWeight: 600, cursor: "pointer", marginTop: 10, minHeight: 48 }}>
+            Editar venta
+          </button>
+          <button onClick={onEditProduct} style={{ width: "100%", background: "#fff", color: "#2C2C2A", border: "1px solid #D3D1C7", borderRadius: 14, padding: "14px 0", fontSize: 15, fontWeight: 600, cursor: "pointer", marginTop: 10, minHeight: 48 }}>
+            Editar producto
+          </button>
+          <button onClick={onUnsell} style={{ width: "100%", background: "#FCEBEB", color: "#A32D2D", border: "none", borderRadius: 14, padding: "14px 0", fontSize: 15, fontWeight: 600, cursor: "pointer", marginTop: 10, minHeight: 48 }}>
+            ↩ Volver a stock
+          </button>
+        </>
       )}
     </div>
   );
@@ -744,8 +760,8 @@ function BottomNav({ tab, setTab }) {
   return (
     <div style={{ position: "sticky", bottom: 0, background: "#fff", borderTop: "1px solid #F1EFE8", display: "flex", zIndex: 20, marginLeft: -16, marginRight: -16 }}>
       {[
-        { id: "list", label: "Inventario", icon: "📦" },
-        { id: "historial", label: "Historial", icon: "📊" },
+        { id: "stock", label: "Stock", icon: "📦" },
+        { id: "vendidos", label: "Vendidos", icon: "💰" },
       ].map((t) => (
         <button key={t.id} onClick={() => setTab(t.id)} style={{ flex: 1, background: "none", border: "none", padding: "10px 0", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 2, fontFamily: "inherit" }}>
           <span style={{ fontSize: 20 }}>{t.icon}</span>
@@ -814,14 +830,14 @@ function AuthScreen() {
 
 function InventoryApp({ session }) {
   const [items, setItems] = useState([]);
-  const [tab, setTab] = useState("list");
-  const [view, setView] = useState("list");
+  const [tab, setTab] = useState("stock");
+  const [view, setView] = useState("list"); // list | detail | form | sell
   const [selected, setSelected] = useState(null);
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState("");
-  const [filterStatus, setFilterStatus] = useState("todos");
   const [filterCat, setFilterCat] = useState("todos");
-  const [advFilters, setAdvFilters] = useState({ priceMin: "", priceMax: "", compraDesde: "", compraHasta: "", staleOnly: false });
+  const [stockFilters, setStockFilters] = useState({ priceMin: "", priceMax: "", compraDesde: "", compraHasta: "", staleOnly: false });
+  const [salesFilters, setSalesFilters] = useState({ ventaDesde: "", ventaHasta: "", metodo: "todos", categoria: "todos" });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
@@ -846,7 +862,7 @@ function InventoryApp({ session }) {
 
   useEffect(() => { fetchItems(); }, [fetchItems]);
 
-  const save = async (product) => {
+  const saveProduct = async (product) => {
     setSaving(true);
     try {
       if (product.id) {
@@ -858,7 +874,7 @@ function InventoryApp({ session }) {
         const { id, ...newP } = product;
         const { error } = await supabase.from("productos").insert([newP]);
         if (error) throw error;
-        showToast("Producto agregado");
+        showToast("Producto agregado a stock");
       }
       await fetchItems();
       setView("list"); setEditing(null); setSelected(null);
@@ -866,6 +882,52 @@ function InventoryApp({ session }) {
       showError("Error: " + err.message);
     }
     setSaving(false);
+  };
+
+  const saveSale = async (saleData) => {
+    setSaving(true);
+    try {
+      const { id, ...updates } = saleData;
+      const { error } = await supabase.from("productos").update(updates).eq("id", id);
+      if (error) throw error;
+      showToast(editing?.fecha_venta ? "Venta actualizada" : "¡Vendido!");
+      await fetchItems();
+      setTab("vendidos");
+      setView("list"); setEditing(null); setSelected(null);
+    } catch (err) {
+      showError("Error: " + err.message);
+    }
+    setSaving(false);
+  };
+
+  const unsell = (item) => {
+    setConfirmDialog({
+      title: "¿Volver a stock?",
+      message: `"${item.nombre}" va a volver a aparecer en Stock. Se van a borrar los datos de la venta (fecha, precio, comprador, método de pago).`,
+      confirmText: "Volver a stock",
+      danger: true,
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        setSaving(true);
+        try {
+          const { error } = await supabase.from("productos").update({
+            fecha_venta: null, precio_venta: 0,
+            comprador_nombre: null, comprador_telefono: null,
+            metodo_pago: null, pago_nota: null,
+            cheque_banco: null, cheque_numero: null, cheque_monto: null, cheque_fecha_cobro: null,
+          }).eq("id", item.id);
+          if (error) throw error;
+          showToast("Producto vuelto a stock");
+          await fetchItems();
+          setTab("stock");
+          setView("list"); setSelected(null); setEditing(null);
+        } catch (err) {
+          showError("Error: " + err.message);
+        }
+        setSaving(false);
+      },
+      onCancel: () => setConfirmDialog(null),
+    });
   };
 
   const requestDelete = (item) => {
@@ -905,31 +967,63 @@ function InventoryApp({ session }) {
 
   const logout = async () => { await supabase.auth.signOut(); };
 
-  const filtered = useMemo(() => {
+  // Split items by tab
+  const stockItems = useMemo(() => items.filter((i) => !i.fecha_venta), [items]);
+  const soldItems = useMemo(() => items.filter((i) => !!i.fecha_venta), [items]);
+
+  const filteredStock = useMemo(() => {
     const q = normalize(search);
-    const pmin = Number(advFilters.priceMin) || null;
-    const pmax = Number(advFilters.priceMax) || null;
-    return items.filter((i) => {
+    const pmin = Number(stockFilters.priceMin) || null;
+    const pmax = Number(stockFilters.priceMax) || null;
+    return stockItems.filter((i) => {
       const ms = !q || normalize(i.nombre).includes(q) || normalize(i.ubicacion).includes(q);
-      const mf = filterStatus === "todos" || (filterStatus === "stock" && !i.fecha_venta) || (filterStatus === "vendidos" && !!i.fecha_venta);
       const mc = filterCat === "todos" || i.categoria === filterCat;
       const mpMin = pmin == null || Number(i.precio_compra) >= pmin;
       const mpMax = pmax == null || Number(i.precio_compra) <= pmax;
-      const mdDesde = !advFilters.compraDesde || (i.fecha_compra && i.fecha_compra >= advFilters.compraDesde);
-      const mdHasta = !advFilters.compraHasta || (i.fecha_compra && i.fecha_compra <= advFilters.compraHasta);
-      const mStale = !advFilters.staleOnly || (!i.fecha_venta && staleDays(i) >= STALE_DAYS);
-      return ms && mf && mc && mpMin && mpMax && mdDesde && mdHasta && mStale;
+      const mdDesde = !stockFilters.compraDesde || (i.fecha_compra && i.fecha_compra >= stockFilters.compraDesde);
+      const mdHasta = !stockFilters.compraHasta || (i.fecha_compra && i.fecha_compra <= stockFilters.compraHasta);
+      const mStale = !stockFilters.staleOnly || staleDays(i) >= STALE_DAYS;
+      return ms && mc && mpMin && mpMax && mdDesde && mdHasta && mStale;
     });
-  }, [items, search, filterStatus, filterCat, advFilters]);
+  }, [stockItems, search, filterCat, stockFilters]);
+
+  const filteredSales = useMemo(() => {
+    const q = normalize(search);
+    return soldItems.filter((i) => {
+      const ms = !q || normalize(i.nombre).includes(q) || normalize(i.comprador_nombre).includes(q);
+      const mdDesde = !salesFilters.ventaDesde || i.fecha_venta >= salesFilters.ventaDesde;
+      const mdHasta = !salesFilters.ventaHasta || i.fecha_venta <= salesFilters.ventaHasta;
+      const mm = salesFilters.metodo === "todos" || i.metodo_pago === salesFilters.metodo;
+      const mc = salesFilters.categoria === "todos" || i.categoria === salesFilters.categoria;
+      return ms && mdDesde && mdHasta && mm && mc;
+    }).sort((a, b) => b.fecha_venta.localeCompare(a.fecha_venta));
+  }, [soldItems, search, salesFilters]);
+
+  const { porMes, meses } = useMemo(() => {
+    const porMes = {};
+    filteredSales.forEach((i) => {
+      const key = i.fecha_venta.slice(0, 7);
+      if (!porMes[key]) porMes[key] = { ganancia: 0, cantidad: 0 };
+      porMes[key].ganancia += Number(i.precio_venta) - Number(i.precio_compra);
+      porMes[key].cantidad += 1;
+    });
+    const meses = Object.keys(porMes).sort().reverse();
+    return { porMes, meses };
+  }, [filteredSales]);
 
   const navBack = () => {
-    if (view === "form" && selected) { setView("detail"); setEditing(null); }
+    if (view === "sell" && selected) { setView("detail"); setEditing(null); }
+    else if (view === "form" && selected) { setView("detail"); setEditing(null); }
     else if (view === "form") { setView("list"); setEditing(null); }
+    else if (view === "sell") { setView("detail"); }
     else if (view === "detail") { setView("list"); setSelected(null); }
   };
 
   const showingSubView = view !== "list";
-  const isHistorial = tab === "historial" && !showingSubView;
+
+  const headerTitle = showingSubView
+    ? (view === "form" ? (editing ? "Editar producto" : "Nuevo producto") : view === "sell" ? (editing?.fecha_venta ? "Editar venta" : "Marcar como vendido") : "Detalle")
+    : (tab === "stock" ? "Stock" : "Vendidos");
 
   return (
     <div style={{ fontFamily: "'DM Sans','Segoe UI',-apple-system,sans-serif", maxWidth: 480, margin: "0 auto", padding: "0 16px", color: "#2C2C2A", minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
@@ -941,70 +1035,102 @@ function InventoryApp({ session }) {
         input,textarea,select,button{font-family:inherit}
         input[type="date"]{min-height:44px}
         ::-webkit-scrollbar{display:none}
+        details summary::-webkit-details-marker{display:none}
       `}</style>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 0", borderBottom: "1px solid #F1EFE8", marginBottom: 14, position: "sticky", top: 0, background: "#fff", zIndex: 10 }}>
         {showingSubView ? (
-          <button onClick={navBack} style={{ background: "none", border: "none", fontSize: 16, color: "#1D9E75", cursor: "pointer", padding: "8px 0", fontWeight: 600, fontFamily: "inherit", minHeight: 44, display: "flex", alignItems: "center" }}>‹ Volver</button>
+          <>
+            <button onClick={navBack} style={{ background: "none", border: "none", fontSize: 16, color: "#1D9E75", cursor: "pointer", padding: "8px 0", fontWeight: 600, fontFamily: "inherit", minHeight: 44, display: "flex", alignItems: "center" }}>‹ Volver</button>
+            <h1 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#2C2C2A" }}>{headerTitle}</h1>
+            <div style={{ width: 60 }} />
+          </>
         ) : (
-          <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0, letterSpacing: -0.5 }}>{isHistorial ? "Historial" : "Casty"}</h1>
-        )}
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {!showingSubView && tab === "list" && items.length > 0 && (
-            <button onClick={() => { setView("form"); setEditing(null); setSelected(null); }} style={{ background: "#1D9E75", color: "#fff", border: "none", borderRadius: 12, padding: "10px 16px", fontSize: 14, fontWeight: 600, cursor: "pointer", minHeight: 44 }}>+ Nuevo</button>
-          )}
-          {!showingSubView && (
-            <div style={{ position: "relative" }}>
-              <button onClick={() => setMenuOpen((v) => !v)} aria-label="Menú" style={{ background: "#F7F6F3", border: "none", borderRadius: 12, width: 44, height: 44, fontSize: 18, cursor: "pointer", fontFamily: "inherit" }}>⋯</button>
-              {menuOpen && (
-                <>
-                  <div onClick={() => setMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 30 }} />
-                  <div style={{ position: "absolute", right: 0, top: 48, background: "#fff", borderRadius: 12, boxShadow: "0 4px 16px rgba(0,0,0,0.12)", zIndex: 31, minWidth: 180, padding: 6 }}>
-                    <div style={{ padding: "8px 12px", fontSize: 11, color: "#888780", borderBottom: "1px solid #F1EFE8", marginBottom: 4, wordBreak: "break-all" }}>{session?.user?.email}</div>
-                    <button onClick={() => { setMenuOpen(false); logout(); }} style={{ width: "100%", background: "none", border: "none", textAlign: "left", padding: "10px 12px", fontSize: 14, fontWeight: 600, color: "#A32D2D", cursor: "pointer", borderRadius: 8, fontFamily: "inherit" }}>Cerrar sesión</button>
-                  </div>
-                </>
+          <>
+            <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0, letterSpacing: -0.5 }}>{headerTitle}</h1>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {tab === "stock" && (
+                <button onClick={() => { setView("form"); setEditing(null); setSelected(null); }} style={{ background: "#1D9E75", color: "#fff", border: "none", borderRadius: 12, padding: "10px 16px", fontSize: 14, fontWeight: 600, cursor: "pointer", minHeight: 44 }}>+ Nuevo</button>
               )}
+              <div style={{ position: "relative" }}>
+                <button onClick={() => setMenuOpen((v) => !v)} aria-label="Menú" style={{ background: "#F7F6F3", border: "none", borderRadius: 12, width: 44, height: 44, fontSize: 18, cursor: "pointer", fontFamily: "inherit" }}>⋯</button>
+                {menuOpen && (
+                  <>
+                    <div onClick={() => setMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 30 }} />
+                    <div style={{ position: "absolute", right: 0, top: 48, background: "#fff", borderRadius: 12, boxShadow: "0 4px 16px rgba(0,0,0,0.12)", zIndex: 31, minWidth: 180, padding: 6 }}>
+                      <div style={{ padding: "8px 12px", fontSize: 11, color: "#888780", borderBottom: "1px solid #F1EFE8", marginBottom: 4, wordBreak: "break-all" }}>{session?.user?.email}</div>
+                      <button onClick={() => { setMenuOpen(false); logout(); }} style={{ width: "100%", background: "none", border: "none", textAlign: "left", padding: "10px 12px", fontSize: 14, fontWeight: 600, color: "#A32D2D", cursor: "pointer", borderRadius: 8, fontFamily: "inherit" }}>Cerrar sesión</button>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
-          )}
-        </div>
+          </>
+        )}
       </div>
 
       <div style={{ flex: 1 }}>
         {loading ? <Spinner />
-          : view === "form" ? <ProductForm item={editing} onSave={save} onDelete={editing ? softDelete : null} onRequestDelete={requestDelete} saving={saving} onError={showError} />
-          : view === "detail" && selected ? <DetailView item={selected} onEdit={() => { setEditing(selected); setView("form"); }} />
-          : isHistorial ? <HistorialView items={items} />
-          : items.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "4rem 1rem" }}>
-              <div style={{ fontSize: 48, marginBottom: 14, opacity: 0.2 }}>📦</div>
-              <p style={{ fontSize: 18, fontWeight: 600, margin: "0 0 6px" }}>Inventario vacío</p>
-              <p style={{ fontSize: 14, color: "#888780", margin: "0 0 24px" }}>Agregá tu primer producto</p>
-              <button onClick={() => setView("form")} style={{ background: "#1D9E75", color: "#fff", border: "none", borderRadius: 14, padding: "14px 32px", fontSize: 16, fontWeight: 600, cursor: "pointer", minHeight: 48 }}>+ Agregar producto</button>
-            </div>
-          ) : (
-            <div style={{ animation: "fadeIn 0.2s ease" }}>
-              <Stats items={items} />
-              <input style={{ ...inp, marginBottom: 8 }} placeholder="Buscar por nombre o ubicación..." value={search} onChange={(e) => setSearch(e.target.value)} />
-              <CategoryFilter value={filterCat} onChange={setFilterCat} items={items} />
-              <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-                {["todos", "stock", "vendidos"].map((v) => (
-                  <button key={v} onClick={() => setFilterStatus(v)} style={{ background: filterStatus === v ? "#2C2C2A" : "#F7F6F3", color: filterStatus === v ? "#fff" : "#5F5E5A", border: "none", borderRadius: 20, padding: "6px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-                    {v === "todos" ? "Todos" : v === "stock" ? "En stock" : "Vendidos"}
-                  </button>
-                ))}
-              </div>
-              <AdvancedFilters filters={advFilters} setFilters={setAdvFilters} />
-              {filtered.length === 0
-                ? <p style={{ textAlign: "center", color: "#888780", padding: "2rem 0", fontSize: 14 }}>Sin resultados</p>
-                : <div>{filtered.map((item) => <ProductCard key={item.id} item={item} onClick={() => { setSelected(item); setView("detail"); }} />)}</div>
-              }
-            </div>
+          : view === "form" ? (
+            <ProductForm item={editing} onSave={saveProduct} onDelete={editing ? softDelete : null} onRequestDelete={requestDelete} saving={saving} onError={showError} />
           )
+          : view === "sell" && editing ? (
+            <SellForm item={editing} onSave={saveSale} saving={saving} onError={showError} isEdit={!!editing.fecha_venta} />
+          )
+          : view === "detail" && selected ? (
+            <DetailView
+              item={selected}
+              onEditProduct={() => { setEditing(selected); setView("form"); }}
+              onMarkSold={() => { setEditing(selected); setView("sell"); }}
+              onEditSale={() => { setEditing(selected); setView("sell"); }}
+              onUnsell={() => unsell(selected)}
+            />
+          )
+          : tab === "stock" ? (
+            stockItems.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "4rem 1rem" }}>
+                <div style={{ fontSize: 48, marginBottom: 14, opacity: 0.2 }}>📦</div>
+                <p style={{ fontSize: 18, fontWeight: 600, margin: "0 0 6px" }}>Stock vacío</p>
+                <p style={{ fontSize: 14, color: "#888780", margin: "0 0 24px" }}>Agregá tu primer producto</p>
+                <button onClick={() => { setView("form"); setEditing(null); }} style={{ background: "#1D9E75", color: "#fff", border: "none", borderRadius: 14, padding: "14px 32px", fontSize: 16, fontWeight: 600, cursor: "pointer", minHeight: 48 }}>+ Agregar producto</button>
+              </div>
+            ) : (
+              <div style={{ animation: "fadeIn 0.2s ease" }}>
+                <StockStats items={items} />
+                <input style={{ ...inp, marginBottom: 8 }} placeholder="Buscar por nombre o ubicación..." value={search} onChange={(e) => setSearch(e.target.value)} />
+                <CategoryFilter value={filterCat} onChange={setFilterCat} items={stockItems} />
+                <StockAdvancedFilters filters={stockFilters} setFilters={setStockFilters} />
+                {filteredStock.length === 0
+                  ? <p style={{ textAlign: "center", color: "#888780", padding: "2rem 0", fontSize: 14 }}>Sin resultados</p>
+                  : <div>{filteredStock.map((item) => <ProductCard key={item.id} item={item} onClick={() => { setSelected(item); setView("detail"); }} />)}</div>
+                }
+              </div>
+            )
+          )
+          : tab === "vendidos" ? (
+            soldItems.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "4rem 1rem" }}>
+                <div style={{ fontSize: 48, marginBottom: 14, opacity: 0.2 }}>💰</div>
+                <p style={{ fontSize: 18, fontWeight: 600, margin: "0 0 6px" }}>Sin ventas aún</p>
+                <p style={{ fontSize: 14, color: "#888780", margin: "0 0 24px" }}>Cuando vendas un producto, aparecerá acá</p>
+              </div>
+            ) : (
+              <div style={{ animation: "fadeIn 0.2s ease" }}>
+                <SalesStats items={filteredSales} porMes={porMes} meses={meses} />
+                <input style={{ ...inp, marginBottom: 10 }} placeholder="Buscar por producto o comprador..." value={search} onChange={(e) => setSearch(e.target.value)} />
+                <VendidosFilters filters={salesFilters} setFilters={setSalesFilters} items={soldItems} />
+                {filteredSales.length === 0
+                  ? <p style={{ textAlign: "center", color: "#888780", padding: "2rem 0", fontSize: 14 }}>Sin resultados</p>
+                  : <div>{filteredSales.map((item) => <ProductCard key={item.id} item={item} onClick={() => { setSelected(item); setView("detail"); }} />)}</div>
+                }
+              </div>
+            )
+          )
+          : null
         }
       </div>
 
-      {!showingSubView && <BottomNav tab={tab} setTab={(t) => { setTab(t); setView("list"); setSelected(null); }} />}
+      {!showingSubView && <BottomNav tab={tab} setTab={(t) => { setTab(t); setView("list"); setSelected(null); setSearch(""); }} />}
       <Toast toast={toast} onClose={closeToast} />
       <Modal open={!!confirmDialog} {...(confirmDialog || {})} />
     </div>
