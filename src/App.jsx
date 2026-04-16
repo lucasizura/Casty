@@ -24,6 +24,16 @@ const CATEGORIAS = [
   { id: "otros", label: "Otros", icon: "📦" },
 ];
 
+const METODOS_PAGO = [
+  { id: "efectivo", label: "Efectivo", icon: "💵" },
+  { id: "transferencia", label: "Transferencia", icon: "🏦" },
+  { id: "cheque", label: "Cheque", icon: "📄" },
+];
+
+function getMetodo(id) {
+  return METODOS_PAGO.find((m) => m.id === id);
+}
+
 const BUCKET = "fotos-productos";
 const MAX_PHOTO_MB = 5;
 const FETCH_LIMIT = 500;
@@ -154,6 +164,45 @@ function CategoryPicker({ value, onChange }) {
   );
 }
 
+function PaymentSection({ f, s }) {
+  const metodo = f.metodo_pago || "efectivo";
+  return (
+    <div style={{ background: "#F7F6F3", borderRadius: 14, padding: 14, marginBottom: 14 }}>
+      <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#5F5E5A", marginBottom: 8 }}>Método de pago</label>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: metodo !== "efectivo" ? 14 : 0 }}>
+        {METODOS_PAGO.map((m) => (
+          <button key={m.id} type="button" onClick={() => s("metodo_pago", m.id)} style={{
+            background: metodo === m.id ? "#E1F5EE" : "#fff",
+            border: metodo === m.id ? "2px solid #1D9E75" : "2px solid #D3D1C7",
+            borderRadius: 10, padding: "10px 4px", cursor: "pointer",
+            display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+            fontFamily: "inherit",
+          }}>
+            <span style={{ fontSize: 20 }}>{m.icon}</span>
+            <span style={{ fontSize: 11, fontWeight: 600, color: metodo === m.id ? "#0F6E56" : "#5F5E5A" }}>{m.label}</span>
+          </button>
+        ))}
+      </div>
+      {metodo === "transferencia" && (
+        <Field label="Referencia / nota (opcional)">
+          <input style={inp} value={f.pago_nota} onChange={(e) => s("pago_nota", e.target.value)} placeholder="Ej: Operación 12345" />
+        </Field>
+      )}
+      {metodo === "cheque" && (
+        <>
+          <Field label="Banco"><input style={inp} value={f.cheque_banco} onChange={(e) => s("cheque_banco", e.target.value)} placeholder="Ej: Galicia" /></Field>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <Field label="Nº cheque"><input style={inp} value={f.cheque_numero} onChange={(e) => s("cheque_numero", e.target.value)} placeholder="0000123" /></Field>
+            <Field label="Monto ($)"><input style={inp} type="number" inputMode="numeric" value={f.cheque_monto} onChange={(e) => s("cheque_monto", e.target.value)} placeholder="0" /></Field>
+          </div>
+          <Field label="Fecha de cobro"><input style={inp} type="date" value={f.cheque_fecha_cobro} onChange={(e) => s("cheque_fecha_cobro", e.target.value)} /></Field>
+          <Field label="Titular / librador (opcional)"><input style={inp} value={f.cheque_titular} onChange={(e) => s("cheque_titular", e.target.value)} placeholder="Ej: Juan Pérez" /></Field>
+        </>
+      )}
+    </div>
+  );
+}
+
 function PhotoUpload({ value, onChange, onError }) {
   const ref = useRef();
   const [uploading, setUploading] = useState(false);
@@ -237,6 +286,13 @@ function ProductForm({ item, onSave, onDelete, saving, onRequestDelete, onError 
     fecha_venta: item?.fecha_venta || "",
     foto_url: item?.foto_url || "",
     categoria: item?.categoria || "otros",
+    metodo_pago: item?.metodo_pago || "efectivo",
+    pago_nota: item?.pago_nota || "",
+    cheque_banco: item?.cheque_banco || "",
+    cheque_numero: item?.cheque_numero || "",
+    cheque_monto: item?.cheque_monto ?? "",
+    cheque_fecha_cobro: item?.cheque_fecha_cobro || "",
+    cheque_titular: item?.cheque_titular || "",
   });
   const s = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
@@ -251,6 +307,11 @@ function ProductForm({ item, onSave, onDelete, saving, onRequestDelete, onError 
     if (f.fecha_compra && f.fecha_venta && f.fecha_venta < f.fecha_compra) {
       return onError("La fecha de venta no puede ser anterior a la de compra.");
     }
+    if (hasFechaVenta && f.metodo_pago === "cheque") {
+      if (!f.cheque_banco.trim()) return onError("Ingresá el banco del cheque.");
+      if (!f.cheque_fecha_cobro) return onError("Ingresá la fecha de cobro del cheque.");
+    }
+    const isSold = !!f.fecha_venta;
     onSave({
       ...f,
       id: item?.id,
@@ -258,6 +319,13 @@ function ProductForm({ item, onSave, onDelete, saving, onRequestDelete, onError 
       precio_venta: precioVenta,
       fecha_compra: f.fecha_compra || null,
       fecha_venta: f.fecha_venta || null,
+      metodo_pago: isSold ? (f.metodo_pago || "efectivo") : null,
+      pago_nota: isSold && f.metodo_pago === "transferencia" ? (f.pago_nota || null) : null,
+      cheque_banco: isSold && f.metodo_pago === "cheque" ? (f.cheque_banco || null) : null,
+      cheque_numero: isSold && f.metodo_pago === "cheque" ? (f.cheque_numero || null) : null,
+      cheque_monto: isSold && f.metodo_pago === "cheque" && f.cheque_monto !== "" ? Number(f.cheque_monto) || 0 : null,
+      cheque_fecha_cobro: isSold && f.metodo_pago === "cheque" ? (f.cheque_fecha_cobro || null) : null,
+      cheque_titular: isSold && f.metodo_pago === "cheque" ? (f.cheque_titular || null) : null,
     });
   };
 
@@ -277,6 +345,7 @@ function ProductForm({ item, onSave, onDelete, saving, onRequestDelete, onError 
           <Field label="Fecha compra"><input style={inp} type="date" value={f.fecha_compra} onChange={(e) => s("fecha_compra", e.target.value)} /></Field>
           <Field label="Fecha venta"><input style={inp} type="date" value={f.fecha_venta} onChange={(e) => s("fecha_venta", e.target.value)} /></Field>
         </div>
+        {f.fecha_venta && <PaymentSection f={f} s={s} />}
       </div>
       <button disabled={saving} onClick={handleSave} style={{ width: "100%", background: saving ? "#9FE1CB" : "#1D9E75", color: "#fff", border: "none", borderRadius: 14, padding: "14px 0", fontSize: 16, fontWeight: 600, cursor: saving ? "default" : "pointer", marginTop: 8, minHeight: 48 }}>
         {saving ? "Guardando..." : item ? "Guardar cambios" : "Agregar producto"}
@@ -323,22 +392,36 @@ function Stats({ items }) {
     const vendidos = items.filter((i) => !!i.fecha_venta);
     const invertido = stock.reduce((s, i) => s + (Number(i.precio_compra) || 0), 0);
     const ganancia = vendidos.filter((i) => i.precio_venta).reduce((s, i) => s + (Number(i.precio_venta) - Number(i.precio_compra)), 0);
-    return { stock: stock.length, vendidos: vendidos.length, invertido, ganancia };
+    const today = new Date().toISOString().slice(0, 10);
+    const chequesPend = items.filter((i) => i.metodo_pago === "cheque" && i.cheque_fecha_cobro && i.cheque_fecha_cobro >= today);
+    const chequesMonto = chequesPend.reduce((s, i) => s + (Number(i.cheque_monto) || Number(i.precio_venta) || 0), 0);
+    return { stock: stock.length, vendidos: vendidos.length, invertido, ganancia, chequesCount: chequesPend.length, chequesMonto };
   }, [items]);
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
-      {[
-        { label: "En stock", value: stats.stock, color: "#185FA5" },
-        { label: "Vendidos", value: stats.vendidos, color: "#3B6D11" },
-        { label: "Invertido (stock)", value: formatCurrency(stats.invertido), color: "#854F0B" },
-        { label: "Ganancia", value: formatCurrency(stats.ganancia), color: stats.ganancia >= 0 ? "#0F6E56" : "#A32D2D" },
-      ].map((d) => (
-        <div key={d.label} style={{ background: "#F7F6F3", borderRadius: 12, padding: "10px 12px" }}>
-          <div style={{ fontSize: 11, color: "#888780", marginBottom: 2 }}>{d.label}</div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: d.color }}>{d.value}</div>
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: stats.chequesCount > 0 ? 8 : 16 }}>
+        {[
+          { label: "En stock", value: stats.stock, color: "#185FA5" },
+          { label: "Vendidos", value: stats.vendidos, color: "#3B6D11" },
+          { label: "Invertido (stock)", value: formatCurrency(stats.invertido), color: "#854F0B" },
+          { label: "Ganancia", value: formatCurrency(stats.ganancia), color: stats.ganancia >= 0 ? "#0F6E56" : "#A32D2D" },
+        ].map((d) => (
+          <div key={d.label} style={{ background: "#F7F6F3", borderRadius: 12, padding: "10px 12px" }}>
+            <div style={{ fontSize: 11, color: "#888780", marginBottom: 2 }}>{d.label}</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: d.color }}>{d.value}</div>
+          </div>
+        ))}
+      </div>
+      {stats.chequesCount > 0 && (
+        <div style={{ background: "#FFF7E6", border: "1px solid #F5E3B8", borderRadius: 12, padding: "10px 14px", marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 11, color: "#854F0B", marginBottom: 2, fontWeight: 600 }}>📄 Cheques por cobrar</div>
+            <div style={{ fontSize: 12, color: "#854F0B" }}>{stats.chequesCount} {stats.chequesCount === 1 ? "cheque pendiente" : "cheques pendientes"}</div>
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#854F0B" }}>{formatCurrency(stats.chequesMonto)}</div>
         </div>
-      ))}
-    </div>
+      )}
+    </>
   );
 }
 
@@ -399,6 +482,35 @@ function DetailView({ item, onEdit }) {
           </div>
         ))}
       </div>
+      {item.fecha_venta && item.metodo_pago && (() => {
+        const m = getMetodo(item.metodo_pago);
+        const rows = item.metodo_pago === "cheque" ? [
+          { label: "Banco", value: item.cheque_banco },
+          { label: "Nº cheque", value: item.cheque_numero },
+          { label: "Monto del cheque", value: item.cheque_monto ? formatCurrency(item.cheque_monto) : null },
+          { label: "Fecha de cobro", value: item.cheque_fecha_cobro ? formatDate(item.cheque_fecha_cobro) : null },
+          { label: "Titular", value: item.cheque_titular },
+        ].filter((r) => r.value) : item.metodo_pago === "transferencia" && item.pago_nota ? [
+          { label: "Referencia", value: item.pago_nota },
+        ] : [];
+        return (
+          <div style={{ marginTop: 16 }}>
+            <p style={{ fontSize: 13, fontWeight: 600, color: "#5F5E5A", margin: "0 0 8px" }}>Método de pago</p>
+            <div style={{ background: "#F7F6F3", borderRadius: 12, padding: "12px 14px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: rows.length ? 10 : 0 }}>
+                <span style={{ fontSize: 22 }}>{m?.icon || "💰"}</span>
+                <span style={{ fontSize: 15, fontWeight: 700, color: "#2C2C2A" }}>{m?.label || item.metodo_pago}</span>
+              </div>
+              {rows.map((r) => (
+                <div key={r.label} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid #EEE" }}>
+                  <span style={{ fontSize: 13, color: "#888780" }}>{r.label}</span>
+                  <span style={{ fontSize: 13, fontWeight: 500, color: "#2C2C2A" }}>{r.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
       <button onClick={onEdit} style={{ width: "100%", background: "#2C2C2A", color: "#fff", border: "none", borderRadius: 14, padding: "14px 0", fontSize: 16, fontWeight: 600, cursor: "pointer", marginTop: 20, minHeight: 48 }}>Editar producto</button>
     </div>
   );
