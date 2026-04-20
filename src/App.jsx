@@ -633,18 +633,6 @@ function DetailView({ item, onEditProduct, onMarkSold, onEditSale, onUnsell }) {
   const cat = getCat(item.categoria);
   const photos = item.fotos_urls || [];
 
-  const shareWhatsApp = () => {
-    const price = item.precio_venta || item.precio_compra;
-    const lines = [
-      `*${item.nombre}*`,
-      item.descripcion || "",
-      price ? `Precio: ${formatCurrency(price)}` : "",
-      photos[0] || "",
-    ].filter(Boolean);
-    const text = encodeURIComponent(lines.join("\n"));
-    window.open(`https://wa.me/?text=${text}`, "_blank");
-  };
-
   return (
     <div style={{ animation: "fadeIn 0.2s ease", paddingBottom: 30 }}>
       <PhotoGallery photos={photos} cat={cat} />
@@ -734,19 +722,13 @@ function DetailView({ item, onEditProduct, onMarkSold, onEditSale, onUnsell }) {
           <button onClick={onMarkSold} style={{ width: "100%", background: "#1D9E75", color: "#fff", border: "none", borderRadius: 14, padding: "18px 0", fontSize: 18, fontWeight: 700, cursor: "pointer", marginTop: 24, minHeight: 56, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
             💰 Marcar como vendido
           </button>
-          <button onClick={shareWhatsApp} style={{ width: "100%", background: "#25D366", color: "#fff", border: "none", borderRadius: 14, padding: "16px 0", fontSize: 16, fontWeight: 700, cursor: "pointer", marginTop: 10, minHeight: 52, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-            <span style={{ fontSize: 20 }}>💬</span> Compartir por WhatsApp
-          </button>
           <button onClick={onEditProduct} style={{ width: "100%", background: "#2C2C2A", color: "#fff", border: "none", borderRadius: 14, padding: "16px 0", fontSize: 16, fontWeight: 700, cursor: "pointer", marginTop: 10, minHeight: 52 }}>
             ✏️ Editar producto
           </button>
         </>
       ) : (
         <>
-          <button onClick={shareWhatsApp} style={{ width: "100%", background: "#25D366", color: "#fff", border: "none", borderRadius: 14, padding: "18px 0", fontSize: 17, fontWeight: 700, cursor: "pointer", marginTop: 24, minHeight: 56, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-            <span style={{ fontSize: 22 }}>💬</span> Compartir por WhatsApp
-          </button>
-          <button onClick={onEditSale} style={{ width: "100%", background: "#2C2C2A", color: "#fff", border: "none", borderRadius: 14, padding: "16px 0", fontSize: 16, fontWeight: 700, cursor: "pointer", marginTop: 10, minHeight: 52 }}>
+          <button onClick={onEditSale} style={{ width: "100%", background: "#2C2C2A", color: "#fff", border: "none", borderRadius: 14, padding: "18px 0", fontSize: 17, fontWeight: 700, cursor: "pointer", marginTop: 24, minHeight: 56 }}>
             ✏️ Editar venta
           </button>
           <button onClick={onEditProduct} style={{ width: "100%", background: "#fff", color: "#2C2C2A", border: "1px solid #C5C3B9", borderRadius: 14, padding: "16px 0", fontSize: 16, fontWeight: 700, cursor: "pointer", marginTop: 10, minHeight: 52 }}>
@@ -761,17 +743,211 @@ function DetailView({ item, onEditProduct, onMarkSold, onEditSale, onUnsell }) {
   );
 }
 
+function ChequesView({ items, onOpen }) {
+  const [subTab, setSubTab] = useState("pendientes");
+  const today = new Date().toISOString().slice(0, 10);
+
+  const { pendientes, cobrados } = useMemo(() => {
+    const all = items.filter((i) => i.metodo_pago === "cheque");
+    const pend = all.filter((i) => i.cheque_fecha_cobro && i.cheque_fecha_cobro >= today)
+      .sort((a, b) => a.cheque_fecha_cobro.localeCompare(b.cheque_fecha_cobro));
+    const cobr = all.filter((i) => !i.cheque_fecha_cobro || i.cheque_fecha_cobro < today)
+      .sort((a, b) => (b.cheque_fecha_cobro || "").localeCompare(a.cheque_fecha_cobro || ""));
+    return { pendientes: pend, cobrados: cobr };
+  }, [items, today]);
+
+  const list = subTab === "pendientes" ? pendientes : cobrados;
+  const totalMonto = list.reduce((s, i) => s + (Number(i.cheque_monto) || Number(i.precio_venta) || 0), 0);
+
+  return (
+    <div style={{ animation: "fadeIn 0.2s ease", paddingBottom: 40 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 18 }}>
+        <div style={{ background: "#F7F6F3", borderRadius: 14, padding: "14px 16px" }}>
+          <div style={{ fontSize: 14, color: "#5F5E5A", marginBottom: 4 }}>📄 {subTab === "pendientes" ? "Pendientes" : "Cobrados"}</div>
+          <div style={{ fontSize: 26, fontWeight: 700, color: "#854F0B", lineHeight: 1.1 }}>{list.length}</div>
+        </div>
+        <div style={{ background: "#F7F6F3", borderRadius: 14, padding: "14px 16px" }}>
+          <div style={{ fontSize: 14, color: "#5F5E5A", marginBottom: 4 }}>💰 Total</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: "#854F0B", lineHeight: 1.1 }}>{formatCurrency(totalMonto)}</div>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        <button onClick={() => setSubTab("pendientes")} style={{ flex: 1, background: subTab === "pendientes" ? "#1D9E75" : "#F7F6F3", color: subTab === "pendientes" ? "#fff" : "#3F3E3A", border: "none", borderRadius: 12, padding: "12px 0", fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", minHeight: 48 }}>
+          Pendientes ({pendientes.length})
+        </button>
+        <button onClick={() => setSubTab("cobrados")} style={{ flex: 1, background: subTab === "cobrados" ? "#1D9E75" : "#F7F6F3", color: subTab === "cobrados" ? "#fff" : "#3F3E3A", border: "none", borderRadius: 12, padding: "12px 0", fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", minHeight: 48 }}>
+          Cobrados ({cobrados.length})
+        </button>
+      </div>
+      {list.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "3rem 1rem" }}>
+          <div style={{ fontSize: 56, opacity: 0.25, marginBottom: 14 }}>📄</div>
+          <p style={{ fontSize: 16, color: "#5F5E5A" }}>{subTab === "pendientes" ? "No tenés cheques pendientes" : "Todavía no cobraste cheques"}</p>
+        </div>
+      ) : (
+        list.map((item) => {
+          const monto = Number(item.cheque_monto) || Number(item.precio_venta) || 0;
+          const vencido = subTab === "pendientes" ? false : (item.cheque_fecha_cobro && item.cheque_fecha_cobro < today);
+          return (
+            <div key={item.id} role="button" tabIndex={0} onClick={() => onOpen(item)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(item); } }} style={{ background: "#fff", border: "1px solid #E5E3DB", borderRadius: 14, padding: 14, marginBottom: 10, cursor: "pointer", outline: "none" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: "#2C2C2A", marginBottom: 2 }}>{item.cheque_banco || "Banco no indicado"}</div>
+                  {item.cheque_titular && <div style={{ fontSize: 14, color: "#5F5E5A" }}>Titular: {item.cheque_titular}</div>}
+                </div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "#854F0B", whiteSpace: "nowrap", marginLeft: 10 }}>{formatCurrency(monto)}</div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #F1EFE8", paddingTop: 8, gap: 8 }}>
+                <div style={{ fontSize: 13, color: "#3F3E3A", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {getCat(item.categoria).icon} {item.nombre}
+                </div>
+                <div style={{ fontSize: 13, color: vencido ? "#A32D2D" : "#5F5E5A", fontWeight: 600, whiteSpace: "nowrap" }}>
+                  📅 {item.cheque_fecha_cobro ? formatDate(item.cheque_fecha_cobro) : "Sin fecha"}
+                </div>
+              </div>
+              {item.cheque_numero && <div style={{ fontSize: 12, color: "#5F5E5A", marginTop: 4 }}>Nº {item.cheque_numero}</div>}
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
+function AnalisisView({ items }) {
+  const stats = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    const stock = items.filter((i) => !i.fecha_venta);
+    const vendidos = items.filter((i) => i.fecha_venta && i.precio_venta);
+    const invertido = stock.reduce((s, i) => s + (Number(i.precio_compra) || 0), 0);
+    const totalVendido = vendidos.reduce((s, i) => s + Number(i.precio_venta), 0);
+    const totalCostoVendido = vendidos.reduce((s, i) => s + Number(i.precio_compra), 0);
+    const ganancia = totalVendido - totalCostoVendido;
+    const ticketProm = vendidos.length ? totalVendido / vendidos.length : 0;
+    const margenProm = totalCostoVendido > 0 ? (ganancia / totalCostoVendido) * 100 : 0;
+
+    const thisMonth = new Date().toISOString().slice(0, 7);
+    const ventasMes = vendidos.filter((i) => i.fecha_venta.startsWith(thisMonth));
+    const gananciaMes = ventasMes.reduce((s, i) => s + (Number(i.precio_venta) - Number(i.precio_compra)), 0);
+
+    const chequesPend = items.filter((i) => i.metodo_pago === "cheque" && i.cheque_fecha_cobro && i.cheque_fecha_cobro >= today);
+    const chequesMonto = chequesPend.reduce((s, i) => s + (Number(i.cheque_monto) || Number(i.precio_venta) || 0), 0);
+
+    const porMes = {};
+    vendidos.forEach((i) => {
+      const key = i.fecha_venta.slice(0, 7);
+      if (!porMes[key]) porMes[key] = { ganancia: 0, cantidad: 0, ingresos: 0 };
+      porMes[key].ganancia += Number(i.precio_venta) - Number(i.precio_compra);
+      porMes[key].cantidad += 1;
+      porMes[key].ingresos += Number(i.precio_venta);
+    });
+    const meses = Object.keys(porMes).sort().reverse();
+
+    const porCategoria = {};
+    vendidos.forEach((i) => {
+      const k = i.categoria || "otros";
+      if (!porCategoria[k]) porCategoria[k] = { cantidad: 0, ganancia: 0 };
+      porCategoria[k].cantidad += 1;
+      porCategoria[k].ganancia += Number(i.precio_venta) - Number(i.precio_compra);
+    });
+    const topCats = Object.entries(porCategoria).sort((a, b) => b[1].ganancia - a[1].ganancia).slice(0, 5);
+
+    return { invertido, totalVendido, ganancia, ticketProm, margenProm, gananciaMes, ventasMesCount: ventasMes.length, chequesCount: chequesPend.length, chequesMonto, meses, porMes, topCats, vendidosCount: vendidos.length, stockCount: stock.length };
+  }, [items]);
+
+  const StatCard = ({ icon, label, value, color }) => (
+    <div style={{ background: "#F7F6F3", borderRadius: 14, padding: "14px 16px" }}>
+      <div style={{ fontSize: 13, color: "#5F5E5A", marginBottom: 4 }}>{icon} {label}</div>
+      <div style={{ fontSize: 18, fontWeight: 700, color: color || "#2C2C2A", lineHeight: 1.15 }}>{value}</div>
+    </div>
+  );
+
+  return (
+    <div style={{ animation: "fadeIn 0.2s ease", paddingBottom: 40 }}>
+      <h2 style={{ fontSize: 15, fontWeight: 700, color: "#3F3E3A", margin: "4px 0 10px" }}>Situación actual</h2>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 18 }}>
+        <StatCard icon="📦" label="Stock" value={`${stats.stockCount} items`} color="#185FA5" />
+        <StatCard icon="💵" label="Invertido" value={formatCurrency(stats.invertido)} color="#854F0B" />
+        <StatCard icon="📄" label="Cheques pendientes" value={`${stats.chequesCount} · ${formatCurrency(stats.chequesMonto)}`} color="#854F0B" />
+        <StatCard icon="💰" label="Ventas totales" value={stats.vendidosCount} color="#3B6D11" />
+      </div>
+
+      <h2 style={{ fontSize: 15, fontWeight: 700, color: "#3F3E3A", margin: "4px 0 10px" }}>Performance acumulada</h2>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 18 }}>
+        <StatCard icon="📈" label="Ganancia total" value={formatCurrency(stats.ganancia)} color={stats.ganancia >= 0 ? "#0F6E56" : "#A32D2D"} />
+        <StatCard icon="💸" label="Ingresos totales" value={formatCurrency(stats.totalVendido)} color="#2C2C2A" />
+        <StatCard icon="🎟️" label="Ticket promedio" value={formatCurrency(stats.ticketProm)} color="#2C2C2A" />
+        <StatCard icon="📊" label="Margen promedio" value={`${stats.margenProm.toFixed(1)}%`} color={stats.margenProm >= 0 ? "#0F6E56" : "#A32D2D"} />
+      </div>
+
+      <h2 style={{ fontSize: 15, fontWeight: 700, color: "#3F3E3A", margin: "4px 0 10px" }}>Este mes</h2>
+      <div style={{ background: "#F7F6F3", borderRadius: 14, padding: "14px 16px", marginBottom: 18, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <div style={{ fontSize: 14, color: "#5F5E5A", marginBottom: 2 }}>{stats.ventasMesCount} {stats.ventasMesCount === 1 ? "venta" : "ventas"}</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: stats.gananciaMes >= 0 ? "#0F6E56" : "#A32D2D" }}>{formatCurrency(stats.gananciaMes)}</div>
+        </div>
+        <div style={{ fontSize: 32 }}>📈</div>
+      </div>
+
+      {stats.meses.length > 0 && (
+        <>
+          <h2 style={{ fontSize: 15, fontWeight: 700, color: "#3F3E3A", margin: "4px 0 10px" }}>Ganancia por mes</h2>
+          <div style={{ marginBottom: 18 }}>
+            {stats.meses.slice(0, 12).map((m) => {
+              const g = stats.porMes[m].ganancia;
+              return (
+                <div key={m} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", background: "#F7F6F3", borderRadius: 12, marginBottom: 6 }}>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: "#2C2C2A" }}>{monthLabelFull(m)}</div>
+                    <div style={{ fontSize: 12, color: "#5F5E5A", marginTop: 2 }}>{stats.porMes[m].cantidad} {stats.porMes[m].cantidad === 1 ? "venta" : "ventas"} · {formatCurrency(stats.porMes[m].ingresos)}</div>
+                  </div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: g >= 0 ? "#0F6E56" : "#A32D2D" }}>{g >= 0 ? "+" : ""}{formatCurrency(g)}</div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {stats.topCats.length > 0 && (
+        <>
+          <h2 style={{ fontSize: 15, fontWeight: 700, color: "#3F3E3A", margin: "4px 0 10px" }}>Top categorías (por ganancia)</h2>
+          <div>
+            {stats.topCats.map(([catId, data]) => {
+              const cat = getCat(catId);
+              return (
+                <div key={catId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", background: "#F7F6F3", borderRadius: 12, marginBottom: 6 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 24 }}>{cat.icon}</span>
+                    <div>
+                      <div style={{ fontSize: 15, fontWeight: 600, color: "#2C2C2A" }}>{cat.label}</div>
+                      <div style={{ fontSize: 12, color: "#5F5E5A", marginTop: 2 }}>{data.cantidad} {data.cantidad === 1 ? "venta" : "ventas"}</div>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: data.ganancia >= 0 ? "#0F6E56" : "#A32D2D" }}>{data.ganancia >= 0 ? "+" : ""}{formatCurrency(data.ganancia)}</div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function BottomNav({ tab, setTab }) {
   return (
     <div style={{ position: "sticky", bottom: 0, background: "#fff", borderTop: "1px solid #E5E3DB", display: "flex", zIndex: 20, marginLeft: -16, marginRight: -16, paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
       {[
-        { id: "stock", label: "Stock", icon: "📦" },
+        { id: "stock", label: "Inventario", icon: "📦" },
         { id: "vendidos", label: "Vendidos", icon: "💰" },
+        { id: "cheques", label: "Cheques", icon: "📄" },
+        { id: "analisis", label: "Análisis", icon: "📊" },
       ].map((t) => (
-        <button key={t.id} onClick={() => setTab(t.id)} style={{ flex: 1, background: "none", border: "none", padding: "14px 0 10px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, fontFamily: "inherit" }}>
-          <span style={{ fontSize: 28 }}>{t.icon}</span>
-          <span style={{ fontSize: 14, fontWeight: 700, color: tab === t.id ? "#1D9E75" : "#5F5E5A" }}>{t.label}</span>
-          {tab === t.id && <div style={{ width: 28, height: 3, background: "#1D9E75", borderRadius: 3 }} />}
+        <button key={t.id} onClick={() => setTab(t.id)} style={{ flex: 1, background: "none", border: "none", padding: "12px 0 8px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, fontFamily: "inherit", minWidth: 0 }}>
+          <span style={{ fontSize: 24 }}>{t.icon}</span>
+          <span style={{ fontSize: 11, fontWeight: 700, color: tab === t.id ? "#1D9E75" : "#5F5E5A", whiteSpace: "nowrap" }}>{t.label}</span>
+          {tab === t.id && <div style={{ width: 22, height: 3, background: "#1D9E75", borderRadius: 3 }} />}
         </button>
       ))}
     </div>
@@ -1015,7 +1191,7 @@ function InventoryApp({ session }) {
 
   const headerTitle = showingSubView
     ? (view === "form" ? (editing ? "Editar producto" : "Nuevo producto") : view === "sell" ? (editing?.fecha_venta ? "Editar venta" : "Marcar como vendido") : "Detalle")
-    : (tab === "stock" ? "Stock" : "Vendidos");
+    : (tab === "stock" ? "Inventario" : tab === "vendidos" ? "Vendidos" : tab === "cheques" ? "Cheques" : "Análisis");
 
   return (
     <div style={{ fontFamily: "'DM Sans','Segoe UI',-apple-system,sans-serif", maxWidth: 480, margin: "0 auto", padding: "0 16px", color: "#2C2C2A", minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
@@ -1117,6 +1293,12 @@ function InventoryApp({ session }) {
                 }
               </div>
             )
+          )
+          : tab === "cheques" ? (
+            <ChequesView items={items} onOpen={(item) => { setSelected(item); setView("detail"); }} />
+          )
+          : tab === "analisis" ? (
+            <AnalisisView items={items} />
           )
           : null
         }
