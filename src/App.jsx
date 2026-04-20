@@ -327,6 +327,7 @@ function SellForm({ item, onSave, saving, onError, isEdit }) {
       cheque_monto: f.metodo_pago === "cheque" && f.cheque_monto !== "" ? Number(f.cheque_monto) || 0 : null,
       cheque_fecha_cobro: f.metodo_pago === "cheque" ? (f.cheque_fecha_cobro || null) : null,
       cheque_titular: f.metodo_pago === "cheque" ? (f.cheque_titular || null) : null,
+      cheque_cobrado_at: f.metodo_pago === "cheque" ? (item.cheque_cobrado_at || null) : null,
     });
   };
 
@@ -458,7 +459,7 @@ function SalesStats({ items, porMes, meses }) {
   const stats = useMemo(() => {
     const ganancia = items.reduce((s, i) => s + (Number(i.precio_venta) - Number(i.precio_compra)), 0);
     const today = new Date().toISOString().slice(0, 10);
-    const chequesPend = items.filter((i) => i.metodo_pago === "cheque" && i.cheque_fecha_cobro && i.cheque_fecha_cobro >= today);
+    const chequesPend = items.filter((i) => i.metodo_pago === "cheque" && !i.cheque_cobrado_at);
     const chequesMonto = chequesPend.reduce((s, i) => s + (Number(i.cheque_monto) || Number(i.precio_venta) || 0), 0);
     return { count: items.length, ganancia, chequesCount: chequesPend.length, chequesMonto };
   }, [items]);
@@ -627,7 +628,7 @@ function PhotoGallery({ photos, cat }) {
   );
 }
 
-function DetailView({ item, onEditProduct, onMarkSold, onEditSale, onUnsell }) {
+function DetailView({ item, onEditProduct, onMarkSold, onEditSale, onUnsell, onMarkCobrado, onUnmarkCobrado }) {
   const isSold = !!item.fecha_venta;
   const profit = isSold ? Number(item.precio_venta) - Number(item.precio_compra) : null;
   const cat = getCat(item.categoria);
@@ -689,29 +690,48 @@ function DetailView({ item, onEditProduct, onMarkSold, onEditSale, onUnsell }) {
 
       {isSold && item.metodo_pago && (() => {
         const m = getMetodo(item.metodo_pago);
-        const rows = item.metodo_pago === "cheque" ? [
+        const isCheque = item.metodo_pago === "cheque";
+        const cobrado = !!item.cheque_cobrado_at;
+        const rows = isCheque ? [
           { label: "Banco", value: item.cheque_banco },
           { label: "Titular", value: item.cheque_titular },
           { label: "Nº cheque", value: item.cheque_numero },
           { label: "Monto del cheque", value: item.cheque_monto ? formatCurrency(item.cheque_monto) : null },
           { label: "Fecha de cobro", value: item.cheque_fecha_cobro ? formatDate(item.cheque_fecha_cobro) : null },
+          { label: "Cobrado el", value: cobrado ? formatDate(item.cheque_cobrado_at.slice(0, 10)) : null },
         ].filter((r) => r.value) : item.metodo_pago === "transferencia" && item.pago_nota ? [
           { label: "Referencia", value: item.pago_nota },
         ] : [];
         return (
           <div style={{ marginTop: 16 }}>
-            <p style={{ fontSize: 13, fontWeight: 600, color: "#5F5E5A", margin: "0 0 8px" }}>Método de pago</p>
-            <div style={{ background: "#F7F6F3", borderRadius: 12, padding: "12px 14px" }}>
+            <p style={{ fontSize: 14, fontWeight: 600, color: "#5F5E5A", margin: "0 0 8px" }}>Método de pago</p>
+            <div style={{ background: "#F7F6F3", borderRadius: 12, padding: "14px 16px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: rows.length ? 10 : 0 }}>
-                <span style={{ fontSize: 22 }}>{m?.icon || "💰"}</span>
-                <span style={{ fontSize: 15, fontWeight: 700, color: "#2C2C2A" }}>{m?.label || item.metodo_pago}</span>
+                <span style={{ fontSize: 26 }}>{m?.icon || "💰"}</span>
+                <span style={{ fontSize: 16, fontWeight: 700, color: "#2C2C2A" }}>{m?.label || item.metodo_pago}</span>
+                {isCheque && (
+                  <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, padding: "4px 10px", borderRadius: 20, background: cobrado ? "#EAF3DE" : "#FFF1E0", color: cobrado ? "#3B6D11" : "#A35B0A" }}>
+                    {cobrado ? "✓ Cobrado" : "⏳ Pendiente"}
+                  </span>
+                )}
               </div>
               {rows.map((r) => (
-                <div key={r.label} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid #EEE" }}>
-                  <span style={{ fontSize: 13, color: "#5F5E5A" }}>{r.label}</span>
-                  <span style={{ fontSize: 13, fontWeight: 500, color: "#2C2C2A" }}>{r.value}</span>
+                <div key={r.label} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #EEE" }}>
+                  <span style={{ fontSize: 14, color: "#5F5E5A" }}>{r.label}</span>
+                  <span style={{ fontSize: 14, fontWeight: 500, color: "#2C2C2A" }}>{r.value}</span>
                 </div>
               ))}
+              {isCheque && (
+                cobrado ? (
+                  <button onClick={onUnmarkCobrado} style={{ width: "100%", background: "#fff", color: "#5F5E5A", border: "1px solid #C5C3B9", borderRadius: 12, padding: "12px 0", fontSize: 14, fontWeight: 600, cursor: "pointer", marginTop: 12, minHeight: 44, fontFamily: "inherit" }}>
+                    Marcar cheque como pendiente
+                  </button>
+                ) : (
+                  <button onClick={onMarkCobrado} style={{ width: "100%", background: "#1D9E75", color: "#fff", border: "none", borderRadius: 12, padding: "14px 0", fontSize: 16, fontWeight: 700, cursor: "pointer", marginTop: 12, minHeight: 48, fontFamily: "inherit" }}>
+                    ✓ Marcar cheque como cobrado
+                  </button>
+                )
+              )}
             </div>
           </div>
         );
@@ -749,12 +769,12 @@ function ChequesView({ items, onOpen }) {
 
   const { pendientes, cobrados } = useMemo(() => {
     const all = items.filter((i) => i.metodo_pago === "cheque");
-    const pend = all.filter((i) => i.cheque_fecha_cobro && i.cheque_fecha_cobro >= today)
-      .sort((a, b) => a.cheque_fecha_cobro.localeCompare(b.cheque_fecha_cobro));
-    const cobr = all.filter((i) => !i.cheque_fecha_cobro || i.cheque_fecha_cobro < today)
-      .sort((a, b) => (b.cheque_fecha_cobro || "").localeCompare(a.cheque_fecha_cobro || ""));
+    const pend = all.filter((i) => !i.cheque_cobrado_at)
+      .sort((a, b) => (a.cheque_fecha_cobro || "9999").localeCompare(b.cheque_fecha_cobro || "9999"));
+    const cobr = all.filter((i) => !!i.cheque_cobrado_at)
+      .sort((a, b) => (b.cheque_cobrado_at || "").localeCompare(a.cheque_cobrado_at || ""));
     return { pendientes: pend, cobrados: cobr };
-  }, [items, today]);
+  }, [items]);
 
   const list = subTab === "pendientes" ? pendientes : cobrados;
   const totalMonto = list.reduce((s, i) => s + (Number(i.cheque_monto) || Number(i.precio_venta) || 0), 0);
@@ -787,7 +807,7 @@ function ChequesView({ items, onOpen }) {
       ) : (
         list.map((item) => {
           const monto = Number(item.cheque_monto) || Number(item.precio_venta) || 0;
-          const vencido = subTab === "pendientes" ? false : (item.cheque_fecha_cobro && item.cheque_fecha_cobro < today);
+          const vencido = subTab === "pendientes" && item.cheque_fecha_cobro && item.cheque_fecha_cobro < today;
           return (
             <div key={item.id} role="button" tabIndex={0} onClick={() => onOpen(item)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(item); } }} style={{ background: "#fff", border: "1px solid #E5E3DB", borderRadius: 14, padding: 14, marginBottom: 10, cursor: "pointer", outline: "none" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
@@ -802,7 +822,8 @@ function ChequesView({ items, onOpen }) {
                   {getCat(item.categoria).icon} {item.nombre}
                 </div>
                 <div style={{ fontSize: 13, color: vencido ? "#A32D2D" : "#5F5E5A", fontWeight: 600, whiteSpace: "nowrap" }}>
-                  📅 {item.cheque_fecha_cobro ? formatDate(item.cheque_fecha_cobro) : "Sin fecha"}
+                  📅 {subTab === "cobrados" && item.cheque_cobrado_at ? formatDate(item.cheque_cobrado_at.slice(0, 10)) : (item.cheque_fecha_cobro ? formatDate(item.cheque_fecha_cobro) : "Sin fecha")}
+                  {vencido && <span style={{ marginLeft: 6, fontSize: 11 }}>· vencido</span>}
                 </div>
               </div>
               {item.cheque_numero && <div style={{ fontSize: 12, color: "#5F5E5A", marginTop: 4 }}>Nº {item.cheque_numero}</div>}
@@ -830,7 +851,7 @@ function AnalisisView({ items }) {
     const ventasMes = vendidos.filter((i) => i.fecha_venta.startsWith(thisMonth));
     const gananciaMes = ventasMes.reduce((s, i) => s + (Number(i.precio_venta) - Number(i.precio_compra)), 0);
 
-    const chequesPend = items.filter((i) => i.metodo_pago === "cheque" && i.cheque_fecha_cobro && i.cheque_fecha_cobro >= today);
+    const chequesPend = items.filter((i) => i.metodo_pago === "cheque" && !i.cheque_cobrado_at);
     const chequesMonto = chequesPend.reduce((s, i) => s + (Number(i.cheque_monto) || Number(i.precio_venta) || 0), 0);
 
     const porMes = {};
@@ -1068,6 +1089,27 @@ function InventoryApp({ session }) {
     setSaving(false);
   };
 
+  const markCobrado = async (item) => {
+    try {
+      const { error } = await supabase.from("productos").update({ cheque_cobrado_at: new Date().toISOString() }).eq("id", item.id);
+      if (error) throw error;
+      await fetchItems();
+      const fresh = { ...item, cheque_cobrado_at: new Date().toISOString() };
+      setSelected(fresh);
+      showToast("Cheque marcado como cobrado");
+    } catch (err) { showError("Error: " + err.message); }
+  };
+
+  const unmarkCobrado = async (item) => {
+    try {
+      const { error } = await supabase.from("productos").update({ cheque_cobrado_at: null }).eq("id", item.id);
+      if (error) throw error;
+      await fetchItems();
+      setSelected({ ...item, cheque_cobrado_at: null });
+      showToast("Cheque vuelto a pendiente");
+    } catch (err) { showError("Error: " + err.message); }
+  };
+
   const unsell = (item) => {
     setConfirmDialog({
       title: "¿Volver a stock?",
@@ -1083,6 +1125,7 @@ function InventoryApp({ session }) {
             comprador_nombre: null, comprador_telefono: null,
             metodo_pago: null, pago_nota: null,
             cheque_banco: null, cheque_numero: null, cheque_monto: null, cheque_fecha_cobro: null,
+            cheque_titular: null, cheque_cobrado_at: null,
           }).eq("id", item.id);
           if (error) throw error;
           showToast("Producto vuelto a stock");
@@ -1252,6 +1295,8 @@ function InventoryApp({ session }) {
               onMarkSold={() => { setEditing(selected); setView("sell"); }}
               onEditSale={() => { setEditing(selected); setView("sell"); }}
               onUnsell={() => unsell(selected)}
+              onMarkCobrado={() => markCobrado(selected)}
+              onUnmarkCobrado={() => unmarkCobrado(selected)}
             />
           )
           : tab === "stock" ? (

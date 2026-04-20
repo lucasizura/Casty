@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS productos (
   comprador_nombre TEXT,
   comprador_telefono TEXT,
   cheque_titular TEXT,
+  cheque_cobrado_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -43,6 +44,7 @@ ALTER TABLE productos ADD COLUMN IF NOT EXISTS fotos_urls TEXT[] DEFAULT '{}'::T
 ALTER TABLE productos ADD COLUMN IF NOT EXISTS comprador_nombre TEXT;
 ALTER TABLE productos ADD COLUMN IF NOT EXISTS comprador_telefono TEXT;
 ALTER TABLE productos ADD COLUMN IF NOT EXISTS cheque_titular TEXT;
+ALTER TABLE productos ADD COLUMN IF NOT EXISTS cheque_cobrado_at TIMESTAMPTZ;
 
 -- Migracion de foto_url (columna vieja) a fotos_urls, luego drop
 DO $$ BEGIN
