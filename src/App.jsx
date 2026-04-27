@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { supabase } from "./supabaseClient";
-import { downloadTemplate, parseExcelFile, analyzeRows, resolveSkuConflicts, insertRowsInBatches, downloadReport } from "./lib/excelImport";
+import { downloadTemplate, parseExcelFile, analyzeRows, resolveSkuConflicts, insertRowsInBatches, downloadReport, exportProductsToExcel, getNextAutoSkus } from "./lib/excelImport";
 
 const CATEGORIAS = [
   { id: "relojes", label: "Relojes", icon: "⌚" },
@@ -244,6 +244,7 @@ function MultiPhotoUpload({ photos, onChange, onError }) {
 // ProductForm: solo datos del producto (sin venta). Se usa en "Nuevo" y "Editar" de Stock.
 function ProductForm({ item, onSave, onDelete, saving, onRequestDelete, onError }) {
   const [f, setF] = useState({
+    sku: item?.sku || "",
     nombre: item?.nombre || "",
     descripcion: item?.descripcion || "",
     precio_compra: item?.precio_compra ?? "",
@@ -259,6 +260,7 @@ function ProductForm({ item, onSave, onDelete, saving, onRequestDelete, onError 
     onSave({
       ...f,
       id: item?.id,
+      sku: f.sku.trim() || null, // si vacío, saveProduct genera uno
       precio_compra: Number(f.precio_compra) || 0,
       fecha_compra: f.fecha_compra || null,
       fotos_urls: f.fotos_urls || [],
@@ -268,6 +270,7 @@ function ProductForm({ item, onSave, onDelete, saving, onRequestDelete, onError 
   return (
     <div style={{ animation: "fadeIn 0.2s ease", paddingBottom: 30 }}>
       <MultiPhotoUpload photos={f.fotos_urls} onChange={(v) => s("fotos_urls", v)} onError={onError} />
+      <Field label="SKU / código (opcional)"><input style={inp} value={f.sku} onChange={(e) => s("sku", e.target.value)} placeholder="Si lo dejás vacío, se genera automático (INV-0001)" /></Field>
       <Field label="Nombre del producto"><input style={inp} value={f.nombre} onChange={(e) => s("nombre", e.target.value)} placeholder="Ej: Reloj Longines 1940" /></Field>
       <CategoryPicker value={f.categoria} onChange={(v) => s("categoria", v)} />
       <Field label="Descripción"><textarea style={{ ...inp, minHeight: 65, resize: "vertical" }} value={f.descripcion} onChange={(e) => s("descripcion", e.target.value)} placeholder="Materiales, época, estado..." /></Field>
@@ -668,6 +671,7 @@ function DetailView({ item, onEditProduct, onMarkSold, onEditSale, onUnsell, onM
       )}
       <div style={{ borderTop: "1px solid #F1EFE8", paddingTop: 12 }}>
         {[
+          { label: "SKU", value: item.sku },
           { label: "Ubicación", value: item.ubicacion },
           { label: "Fecha de compra", value: item.fecha_compra ? formatDate(item.fecha_compra) : null },
           { label: "Fecha de venta", value: item.fecha_venta ? formatDate(item.fecha_venta) : null },
@@ -1283,6 +1287,11 @@ function InventoryApp({ session }) {
   const saveProduct = async (product) => {
     setSaving(true);
     try {
+      // Auto-generar SKU si quedó vacío (solo en alta nueva)
+      if (!product.id && !product.sku) {
+        const [autoSku] = await getNextAutoSkus(1);
+        product.sku = autoSku;
+      }
       if (product.id) {
         const { id, created_at, updated_at, ...updates } = product;
         const { error } = await supabase.from("productos").update(updates).eq("id", id);
@@ -1291,8 +1300,11 @@ function InventoryApp({ session }) {
       } else {
         const { id, ...newP } = product;
         const { error } = await supabase.from("productos").insert([newP]);
-        if (error) throw error;
-        showToast("Producto agregado a stock");
+        if (error) {
+          if (error.code === "23505") throw new Error(`El SKU "${newP.sku}" ya existe en otro producto`);
+          throw error;
+        }
+        showToast(`Producto agregado (SKU: ${newP.sku})`);
       }
       await fetchItems();
       setView("list"); setEditing(null); setSelected(null);
@@ -1407,6 +1419,15 @@ function InventoryApp({ session }) {
 
   const logout = async () => { await supabase.auth.signOut(); };
 
+  const handleExport = async () => {
+    try {
+      const count = await exportProductsToExcel();
+      showToast(`Exportados ${count} producto${count === 1 ? "" : "s"}`);
+    } catch (err) {
+      showError("Error al exportar: " + (err.message || "desconocido"));
+    }
+  };
+
   // Split items by tab
   const stockItems = useMemo(() => items.filter((i) => !i.fecha_venta), [items]);
   const soldItems = useMemo(() => items.filter((i) => !!i.fecha_venta), [items]);
@@ -1501,6 +1522,7 @@ function InventoryApp({ session }) {
                       <div style={{ padding: "10px 14px", fontSize: 12, color: "#5F5E5A", borderBottom: "1px solid #F1EFE8", marginBottom: 4, wordBreak: "break-all" }}>{session?.user?.email}</div>
                       <button onClick={() => { setMenuOpen(false); downloadTemplate(); }} style={{ width: "100%", background: "none", border: "none", textAlign: "left", padding: "12px 14px", fontSize: 15, fontWeight: 600, color: "#2C2C2A", cursor: "pointer", borderRadius: 8, fontFamily: "inherit", minHeight: 44 }}>📄 Descargar plantilla Excel</button>
                       <button onClick={() => { setMenuOpen(false); setImportOpen(true); }} style={{ width: "100%", background: "none", border: "none", textAlign: "left", padding: "12px 14px", fontSize: 15, fontWeight: 600, color: "#2C2C2A", cursor: "pointer", borderRadius: 8, fontFamily: "inherit", minHeight: 44 }}>📥 Importar productos desde Excel</button>
+                      <button onClick={() => { setMenuOpen(false); handleExport(); }} style={{ width: "100%", background: "none", border: "none", textAlign: "left", padding: "12px 14px", fontSize: 15, fontWeight: 600, color: "#2C2C2A", cursor: "pointer", borderRadius: 8, fontFamily: "inherit", minHeight: 44 }}>📤 Exportar productos a Excel</button>
                       <div style={{ height: 1, background: "#F1EFE8", margin: "4px 0" }} />
                       <button onClick={() => { setMenuOpen(false); logout(); }} style={{ width: "100%", background: "none", border: "none", textAlign: "left", padding: "14px", fontSize: 15, fontWeight: 700, color: "#A32D2D", cursor: "pointer", borderRadius: 8, fontFamily: "inherit", minHeight: 48 }}>Cerrar sesión</button>
                     </div>
