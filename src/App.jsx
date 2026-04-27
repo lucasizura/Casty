@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { supabase } from "./supabaseClient";
+import { downloadTemplate, parseExcelFile, analyzeRows, insertRowsInBatches, downloadReport } from "./lib/excelImport";
 
 const CATEGORIAS = [
   { id: "relojes", label: "Relojes", icon: "⌚" },
@@ -956,6 +957,175 @@ function AnalisisView({ items }) {
   );
 }
 
+function ImportModal({ open, onClose, onComplete, showError }) {
+  const fileRef = useRef();
+  const [stage, setStage] = useState("idle"); // idle | analyzing | preview | importing | done
+  const [analysis, setAnalysis] = useState(null);
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [report, setReport] = useState(null);
+
+  const reset = () => { setStage("idle"); setAnalysis(null); setProgress({ done: 0, total: 0 }); setReport(null); };
+
+  useEffect(() => { if (!open) reset(); }, [open]);
+
+  const handleFile = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    setStage("analyzing");
+    try {
+      const rows = await parseExcelFile(file);
+      if (rows.length === 0) {
+        showError("El archivo no tiene filas para importar");
+        setStage("idle");
+        return;
+      }
+      const result = await analyzeRows(rows);
+      setAnalysis(result);
+      setStage("preview");
+    } catch (err) {
+      showError("Error leyendo el archivo: " + (err.message || "desconocido"));
+      setStage("idle");
+    }
+  };
+
+  const handleConfirmImport = async () => {
+    setStage("importing");
+    setProgress({ done: 0, total: analysis.toInsert.length });
+    try {
+      const { inserted, failed } = await insertRowsInBatches(analysis.toInsert, (done, total) => setProgress({ done, total }));
+      const finalReport = {
+        totalProcessed: analysis.total,
+        inserted, failed,
+        duplicates: analysis.duplicates,
+        invalid: analysis.invalid,
+      };
+      setReport(finalReport);
+      setStage("done");
+      onComplete?.();
+    } catch (err) {
+      showError("Error en la importación: " + (err.message || "desconocido"));
+      setStage("preview");
+    }
+  };
+
+  if (!open) return null;
+
+  return (
+    <div onClick={(e) => { if (e.target === e.currentTarget && stage !== "importing") onClose(); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16, animation: "fadeIn 0.15s ease" }}>
+      <div style={{ background: "#fff", borderRadius: 18, padding: 24, maxWidth: 460, width: "100%", maxHeight: "90vh", overflowY: "auto" }}>
+        <h3 style={{ fontSize: 20, fontWeight: 700, margin: "0 0 16px", color: "#2C2C2A" }}>📥 Importar productos desde Excel</h3>
+
+        {stage === "idle" && (
+          <>
+            <p style={{ fontSize: 15, color: "#5F5E5A", margin: "0 0 18px", lineHeight: 1.5 }}>
+              Subí un archivo .xlsx con los productos. Si no tenés la plantilla, descargala primero desde el menú.
+            </p>
+            <button onClick={() => fileRef.current.click()} style={{ width: "100%", background: "#1D9E75", color: "#fff", border: "none", borderRadius: 14, padding: "16px 0", fontSize: 17, fontWeight: 700, cursor: "pointer", minHeight: 56, fontFamily: "inherit" }}>
+              Seleccionar archivo .xlsx
+            </button>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleFile} style={{ display: "none" }} />
+            <button onClick={onClose} style={{ width: "100%", background: "#F7F6F3", color: "#5F5E5A", border: "none", borderRadius: 14, padding: "14px 0", fontSize: 15, fontWeight: 600, cursor: "pointer", marginTop: 10, minHeight: 48, fontFamily: "inherit" }}>
+              Cancelar
+            </button>
+          </>
+        )}
+
+        {stage === "analyzing" && (
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <Spinner />
+            <p style={{ fontSize: 15, color: "#5F5E5A", marginTop: 8 }}>Analizando archivo...</p>
+          </div>
+        )}
+
+        {stage === "preview" && analysis && (
+          <>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 18 }}>
+              <div style={{ background: "#EAF3DE", padding: "12px 14px", borderRadius: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 14, color: "#3B6D11", fontWeight: 600 }}>✅ Listas para importar</span>
+                <span style={{ fontSize: 18, fontWeight: 700, color: "#3B6D11" }}>{analysis.toInsert.length}</span>
+              </div>
+              {analysis.duplicates.length > 0 && (
+                <div style={{ background: "#FFF7E6", padding: "12px 14px", borderRadius: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontSize: 14, color: "#854F0B", fontWeight: 600 }}>⚠️ Salteadas (duplicadas)</span>
+                  <span style={{ fontSize: 18, fontWeight: 700, color: "#854F0B" }}>{analysis.duplicates.length}</span>
+                </div>
+              )}
+              {analysis.invalid.length > 0 && (
+                <div style={{ background: "#FCEBEB", padding: "12px 14px", borderRadius: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontSize: 14, color: "#A32D2D", fontWeight: 600 }}>❌ Con errores (no se importan)</span>
+                  <span style={{ fontSize: 18, fontWeight: 700, color: "#A32D2D" }}>{analysis.invalid.length}</span>
+                </div>
+              )}
+            </div>
+            {analysis.invalid.length > 0 && (
+              <div style={{ background: "#FCEBEB", padding: "10px 14px", borderRadius: 10, marginBottom: 14, maxHeight: 140, overflowY: "auto" }}>
+                <p style={{ fontSize: 12, fontWeight: 700, color: "#A32D2D", margin: "0 0 6px" }}>Primeros errores:</p>
+                {analysis.invalid.slice(0, 5).map((r, i) => (
+                  <div key={i} style={{ fontSize: 12, color: "#A32D2D", marginBottom: 4, lineHeight: 1.4 }}>
+                    Fila {r.rowNumber}{r.sku ? ` (${r.sku})` : ""}: {r.errors.join("; ")}
+                  </div>
+                ))}
+                {analysis.invalid.length > 5 && <p style={{ fontSize: 12, color: "#A32D2D", margin: "4px 0 0", fontStyle: "italic" }}>...y {analysis.invalid.length - 5} más. Vas a poder descargar el reporte completo después.</p>}
+              </div>
+            )}
+            <button disabled={analysis.toInsert.length === 0} onClick={handleConfirmImport} style={{ width: "100%", background: analysis.toInsert.length === 0 ? "#9FE1CB" : "#1D9E75", color: "#fff", border: "none", borderRadius: 14, padding: "16px 0", fontSize: 17, fontWeight: 700, cursor: analysis.toInsert.length === 0 ? "default" : "pointer", minHeight: 56, fontFamily: "inherit" }}>
+              {analysis.toInsert.length === 0 ? "Nada para importar" : `Importar ${analysis.toInsert.length} producto${analysis.toInsert.length === 1 ? "" : "s"}`}
+            </button>
+            <button onClick={onClose} style={{ width: "100%", background: "#F7F6F3", color: "#5F5E5A", border: "none", borderRadius: 14, padding: "14px 0", fontSize: 15, fontWeight: 600, cursor: "pointer", marginTop: 10, minHeight: 48, fontFamily: "inherit" }}>
+              Cancelar
+            </button>
+          </>
+        )}
+
+        {stage === "importing" && (
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <Spinner />
+            <p style={{ fontSize: 16, color: "#2C2C2A", marginTop: 12, fontWeight: 700 }}>Importando {progress.done} / {progress.total}</p>
+            <p style={{ fontSize: 13, color: "#5F5E5A", marginTop: 4 }}>No cierres la ventana</p>
+            <div style={{ width: "100%", height: 8, background: "#F1EFE8", borderRadius: 4, marginTop: 16, overflow: "hidden" }}>
+              <div style={{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%`, height: "100%", background: "#1D9E75", transition: "width 0.2s" }} />
+            </div>
+          </div>
+        )}
+
+        {stage === "done" && report && (
+          <>
+            <div style={{ background: "#EAF3DE", padding: "16px", borderRadius: 12, marginBottom: 14, textAlign: "center" }}>
+              <div style={{ fontSize: 36, marginBottom: 6 }}>🎉</div>
+              <p style={{ fontSize: 17, fontWeight: 700, color: "#3B6D11", margin: 0 }}>{report.inserted.length} producto{report.inserted.length === 1 ? "" : "s"} importado{report.inserted.length === 1 ? "" : "s"}</p>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #F1EFE8" }}>
+                <span style={{ fontSize: 14, color: "#5F5E5A" }}>Filas procesadas</span>
+                <span style={{ fontSize: 14, fontWeight: 700 }}>{report.totalProcessed}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #F1EFE8" }}>
+                <span style={{ fontSize: 14, color: "#3B6D11" }}>✅ Importadas</span>
+                <span style={{ fontSize: 14, fontWeight: 700, color: "#3B6D11" }}>{report.inserted.length}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #F1EFE8" }}>
+                <span style={{ fontSize: 14, color: "#854F0B" }}>⚠️ Salteadas (duplicadas)</span>
+                <span style={{ fontSize: 14, fontWeight: 700, color: "#854F0B" }}>{report.duplicates.length}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0" }}>
+                <span style={{ fontSize: 14, color: "#A32D2D" }}>❌ Con error</span>
+                <span style={{ fontSize: 14, fontWeight: 700, color: "#A32D2D" }}>{report.invalid.length + report.failed.length}</span>
+              </div>
+            </div>
+            <button onClick={() => downloadReport(report)} style={{ width: "100%", background: "#2C2C2A", color: "#fff", border: "none", borderRadius: 14, padding: "14px 0", fontSize: 15, fontWeight: 700, cursor: "pointer", minHeight: 52, fontFamily: "inherit" }}>
+              📊 Descargar reporte detallado (.xlsx)
+            </button>
+            <button onClick={onClose} style={{ width: "100%", background: "#1D9E75", color: "#fff", border: "none", borderRadius: 14, padding: "14px 0", fontSize: 15, fontWeight: 700, cursor: "pointer", marginTop: 10, minHeight: 52, fontFamily: "inherit" }}>
+              Cerrar
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function BottomNav({ tab, setTab }) {
   return (
     <div style={{ position: "sticky", bottom: 0, background: "#fff", borderTop: "1px solid #E5E3DB", display: "flex", zIndex: 20, marginLeft: -16, marginRight: -16, paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
@@ -1032,6 +1202,7 @@ function InventoryApp({ session }) {
   const [toast, setToast] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   const closeToast = useCallback(() => setToast(null), []);
   const showToast = useCallback((message, type = "success", action = null) => setToast({ message, type, action }), []);
@@ -1270,6 +1441,9 @@ function InventoryApp({ session }) {
                     <div onClick={() => setMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 30 }} />
                     <div style={{ position: "absolute", right: 0, top: 48, background: "#fff", borderRadius: 12, boxShadow: "0 4px 16px rgba(0,0,0,0.12)", zIndex: 31, minWidth: 180, padding: 6 }}>
                       <div style={{ padding: "10px 14px", fontSize: 12, color: "#5F5E5A", borderBottom: "1px solid #F1EFE8", marginBottom: 4, wordBreak: "break-all" }}>{session?.user?.email}</div>
+                      <button onClick={() => { setMenuOpen(false); downloadTemplate(); }} style={{ width: "100%", background: "none", border: "none", textAlign: "left", padding: "12px 14px", fontSize: 15, fontWeight: 600, color: "#2C2C2A", cursor: "pointer", borderRadius: 8, fontFamily: "inherit", minHeight: 44 }}>📄 Descargar plantilla Excel</button>
+                      <button onClick={() => { setMenuOpen(false); setImportOpen(true); }} style={{ width: "100%", background: "none", border: "none", textAlign: "left", padding: "12px 14px", fontSize: 15, fontWeight: 600, color: "#2C2C2A", cursor: "pointer", borderRadius: 8, fontFamily: "inherit", minHeight: 44 }}>📥 Importar productos desde Excel</button>
+                      <div style={{ height: 1, background: "#F1EFE8", margin: "4px 0" }} />
                       <button onClick={() => { setMenuOpen(false); logout(); }} style={{ width: "100%", background: "none", border: "none", textAlign: "left", padding: "14px", fontSize: 15, fontWeight: 700, color: "#A32D2D", cursor: "pointer", borderRadius: 8, fontFamily: "inherit", minHeight: 48 }}>Cerrar sesión</button>
                     </div>
                   </>
@@ -1352,6 +1526,7 @@ function InventoryApp({ session }) {
       {!showingSubView && <BottomNav tab={tab} setTab={(t) => { setTab(t); setView("list"); setSelected(null); setSearch(""); }} />}
       <Toast toast={toast} onClose={closeToast} />
       <Modal open={!!confirmDialog} {...(confirmDialog || {})} />
+      <ImportModal open={importOpen} onClose={() => setImportOpen(false)} onComplete={fetchItems} showError={showError} />
     </div>
   );
 }

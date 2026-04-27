@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS productos (
   comprador_telefono TEXT,
   cheque_titular TEXT,
   cheque_cobrado_at TIMESTAMPTZ,
+  sku TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -45,6 +46,12 @@ ALTER TABLE productos ADD COLUMN IF NOT EXISTS comprador_nombre TEXT;
 ALTER TABLE productos ADD COLUMN IF NOT EXISTS comprador_telefono TEXT;
 ALTER TABLE productos ADD COLUMN IF NOT EXISTS cheque_titular TEXT;
 ALTER TABLE productos ADD COLUMN IF NOT EXISTS cheque_cobrado_at TIMESTAMPTZ;
+ALTER TABLE productos ADD COLUMN IF NOT EXISTS sku TEXT;
+
+-- Indice unico parcial para SKU: NULL no choca, soft-deleted no choca
+CREATE UNIQUE INDEX IF NOT EXISTS idx_productos_sku_unique
+  ON productos (sku)
+  WHERE sku IS NOT NULL AND deleted_at IS NULL;
 
 -- Migracion de foto_url (columna vieja) a fotos_urls, luego drop
 DO $$ BEGIN
