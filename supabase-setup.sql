@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS productos (
   sku TEXT,
   cotizacion_compra NUMERIC(12,2),
   cotizacion_venta NUMERIC(12,2),
+  owner_id UUID NOT NULL DEFAULT auth.uid() REFERENCES auth.users(id),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -51,11 +52,19 @@ ALTER TABLE productos ADD COLUMN IF NOT EXISTS cheque_cobrado_at TIMESTAMPTZ;
 ALTER TABLE productos ADD COLUMN IF NOT EXISTS sku TEXT;
 ALTER TABLE productos ADD COLUMN IF NOT EXISTS cotizacion_compra NUMERIC(12,2);
 ALTER TABLE productos ADD COLUMN IF NOT EXISTS cotizacion_venta NUMERIC(12,2);
+ALTER TABLE productos ADD COLUMN IF NOT EXISTS owner_id UUID REFERENCES auth.users(id);
+ALTER TABLE productos ALTER COLUMN owner_id SET DEFAULT auth.uid();
+-- Para instalaciones existentes con productos sin owner: setearlos antes de hacer NOT NULL
+-- UPDATE productos SET owner_id = '<uuid>' WHERE owner_id IS NULL;
+-- ALTER TABLE productos ALTER COLUMN owner_id SET NOT NULL;
 
--- Indice unico parcial para SKU: NULL no choca, soft-deleted no choca
-CREATE UNIQUE INDEX IF NOT EXISTS idx_productos_sku_unique
-  ON productos (sku)
+-- Indice unico parcial para SKU: por owner (cada user puede tener INV-0001), NULL no choca, soft-deleted no choca
+DROP INDEX IF EXISTS idx_productos_sku_unique;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_productos_owner_sku_unique
+  ON productos (owner_id, sku)
   WHERE sku IS NOT NULL AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_productos_owner_active
+  ON productos (owner_id, deleted_at, created_at DESC);
 
 -- Migracion de foto_url (columna vieja) a fotos_urls, luego drop
 DO $$ BEGIN
@@ -98,15 +107,19 @@ DROP POLICY IF EXISTS "Auth read" ON productos;
 DROP POLICY IF EXISTS "Auth insert" ON productos;
 DROP POLICY IF EXISTS "Auth update" ON productos;
 DROP POLICY IF EXISTS "Auth delete" ON productos;
+DROP POLICY IF EXISTS "Owner read" ON productos;
+DROP POLICY IF EXISTS "Owner insert" ON productos;
+DROP POLICY IF EXISTS "Owner update" ON productos;
+DROP POLICY IF EXISTS "Owner delete" ON productos;
 
-CREATE POLICY "Auth read" ON productos
-  FOR SELECT TO authenticated USING (true);
-CREATE POLICY "Auth insert" ON productos
-  FOR INSERT TO authenticated WITH CHECK (true);
-CREATE POLICY "Auth update" ON productos
-  FOR UPDATE TO authenticated USING (true);
-CREATE POLICY "Auth delete" ON productos
-  FOR DELETE TO authenticated USING (true);
+CREATE POLICY "Owner read" ON productos
+  FOR SELECT TO authenticated USING (owner_id = auth.uid());
+CREATE POLICY "Owner insert" ON productos
+  FOR INSERT TO authenticated WITH CHECK (owner_id = auth.uid());
+CREATE POLICY "Owner update" ON productos
+  FOR UPDATE TO authenticated USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid());
+CREATE POLICY "Owner delete" ON productos
+  FOR DELETE TO authenticated USING (owner_id = auth.uid());
 
 -- 3. Bucket de Storage para fotos
 INSERT INTO storage.buckets (id, name, public)
